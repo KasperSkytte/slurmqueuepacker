@@ -12,10 +12,20 @@ inside `slurmctld`.
 
 ## Status
 
-**v1.0.0.** The daemon runs and the plugin is tested end to end against a real `slurmctld`
+**v<!-- x-release-please-start-version -->1.0.0<!-- x-release-please-end -->.** The daemon runs and the plugin is tested end to end against a real `slurmctld`
 carrying biocloud's topology, including every failure path. Not yet run on a production
 cluster; the next step is a dry run there (see [Dry run on a live cluster](#dry-run-on-a-live-cluster)).
 Default mode is `observe`: compute and log every decision, change nothing.
+
+## Releases
+
+Versions and `CHANGELOG.md` are managed by
+[release-please](https://github.com/googleapis/release-please). Write commits to `main`
+as [Conventional Commits](https://www.conventionalcommits.org/): `fix:` makes a patch
+release, `feat:` a minor one, and `feat!:` or a `BREAKING CHANGE:` footer a major one.
+Other types (`chore:`, `docs:`, `test:`, ...) do not trigger a release. release-please
+keeps a release PR open; merging it tags the release, publishes it on GitHub and bumps
+the version in `sqp/__init__.py` and this README.
 
 ## Layout
 

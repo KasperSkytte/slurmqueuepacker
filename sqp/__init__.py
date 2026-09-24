@@ -1,2 +1,2 @@
 """slurmqueuepacker - state-aware partition placement for Slurm."""
-__version__ = "1.0.0"
+__version__ = "1.0.0"  # x-release-please-version

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "f2660d8cd9d5cc60bba1891fa058b86606b8a2e0",
+  "include-component-in-tag": false,
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "slurmqueuepacker",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": ["sqp/__init__.py", "README.md"]
+    }
+  }
+}
