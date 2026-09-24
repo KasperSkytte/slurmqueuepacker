@@ -17,6 +17,111 @@ carrying biocloud's topology, including every failure path. Not yet run on a pro
 cluster; the next step is a dry run there (see [Dry run on a live cluster](#dry-run-on-a-live-cluster)).
 Default mode is `observe`: compute and log every decision, change nothing.
 
+## Installing
+
+Needs Python 3.11+ (standard library only) and the Slurm commands `scontrol`, `squeue`
+and `sacctmgr`. Run it on the `slurmctld` host. Tested on Slurm 26.05.
+
+### Modes
+
+sqp does only what its `mode` allows, whether you start it by hand or systemd does:
+
+| mode | reads the cluster | writes the policy table the plugin uses | changes QOS limits |
+|---|---|---|---|
+| `observe` (default) | yes | no | no |
+| `advise` | yes | yes | no |
+| `enforce` | yes | yes | yes |
+
+In `observe` it runs only `scontrol show`, `squeue` and `sacctmgr show`, and logs what
+it *would* do. Any other command is refused before a process is started, so this holds
+even under a Slurm admin account. `--dry-run` is the same as `--mode observe`.
+
+### Timing
+
+All in `[cadence]`, in seconds:
+
+| setting | default | what happens |
+|---|---|---|
+| `node_poll_interval` | 1 | reads nodes and partitions (`scontrol show`) |
+| `queue_poll_interval` | 8 | reads the queue (`squeue`) |
+| `score_interval` | 1 | rebuilds the placement table; it is rewritten only when a decision changes, or every `policy_max_age / 3` (100 s) so the plugin does not treat it as stale |
+| `act_interval` | 15 | reconsiders QOS limits. Raising takes `[limits] hysteresis` (5) idle checks in a row, so at least 75 s; lowering back to base is immediate |
+
+sqp never changes the partition of a job that is already submitted. Placement happens
+only at submission, when the plugin reads the current table.
+
+The QOS limits it changes are on an existing QOS, `[limits] qos_name` (default `normal`);
+nothing needs creating. The `flex` QOS belongs to `limits.mode = "perjob"`, which is not
+implemented yet.
+
+### 1. Install
+
+<!-- x-release-please-start-version -->
+```sh
+sudo git clone --branch v1.0.0 https://github.com/<owner>/slurmqueuepacker /opt/slurmqueuepacker
+cd /opt/slurmqueuepacker
+python3 tests/test_policy.py                  # ends in ALL PASS
+```
+<!-- x-release-please-end -->
+
+Run the `python3 -m sqp...` commands from this directory.
+
+### 2. Dry run
+
+```sh
+python3 -m sqp.daemon --dry-run --state-dir ~/sqp-dry --log-file ~/sqp-dry/decisions.jsonl
+```
+
+It runs in the foreground until Ctrl-C. Read the log from another terminal at any time:
+`python3 -m sqp.report ~/sqp-dry/decisions.jsonl --summary`.
+
+Check the `preflight` record first: the partitions sqp will use, and whether your QOS
+caps match `[limits]` in the config. More in [Dry run on a live cluster](#dry-run-on-a-live-cluster).
+
+### 3. Run it as a service (still `observe`)
+
+```sh
+sudo mkdir -p /etc/sqp
+python3 -m sqp.daemon --print-config | sudo tee /etc/sqp/sqp.toml
+sudo cp systemd/sqpd.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now sqpd
+```
+
+The service runs in the mode set in `/etc/sqp/sqp.toml`, which is `observe` as
+generated. It logs to `/var/log/sqp/decisions.jsonl`. The defaults are biocloud's;
+check `[limits]` (base caps must match the live QOS) and `[topology]` (partition speeds).
+
+### 4. Go live
+
+1. **Plugin.** `lua/job_submit.lua` replaces your `job_submit.lua` and carries biocloud's
+   routing rules (GPU, interactive, Open OnDemand), so merge in your own and set the
+   constants at the top of the file. Copy it next to `slurm.conf`, set
+   `JobSubmitPlugins=lua` and run `scontrol reconfigure`. **This changes placement:**
+   until sqp writes a table, the plugin applies its static `SLIM`/`FAT` rule.
+2. **`advise`.** Set `mode = "advise"` and `sudo systemctl restart sqpd`. The plugin now
+   uses sqp's table.
+3. **`enforce`.** Set `mode = "enforce"` and restart. sqp now also changes QOS limits.
+
+### Upgrading
+
+```sh
+cd /opt/slurmqueuepacker && sudo git fetch --tags && sudo git checkout vX.Y.Z
+sudo systemctl restart sqpd
+```
+
+If `lua/` changed (`sudo git diff --stat <old tag> vX.Y.Z -- lua/`), merge it into your
+installed plugin and run `scontrol reconfigure`.
+
+### Backing out
+
+- **Instantly:** `sudo touch /etc/sqp/disable`. The plugin falls back to its static
+  rule on the next submission, and sqp stops writing the table and changing limits.
+- **For good:** restore your old `job_submit.lua`, run `scontrol reconfigure`, then
+  `sudo systemctl disable --now sqpd`.
+- **QOS limits** raised in `enforce` stay raised after sqp stops. Reset them with
+  `sudo sacctmgr -i modify qos normal set MaxTRESPU=cpu=864 MaxTRESPA=cpu=1760`,
+  using your QOS name and base values.
+
 ## Releases
 
 Versions and `CHANGELOG.md` are managed by
@@ -90,20 +195,10 @@ scontrol update nodename=bio-node[14-15] state=drain reason=test   # watch decis
 tests/testcluster.sh stop
 ```
 
-Modes, in increasing order of authority:
-
-| mode | what it does |
-|---|---|
-| `observe` | computes and logs every decision to JSONL; changes nothing (default) |
-| `advise` | also writes the policy table for the plugin |
-| `enforce` | also adjusts QOS limits |
-
 ### Dry run on a live cluster
 
 `--dry-run` (the same as `--mode observe`) runs the full loop against the real cluster
-and changes nothing. It needs only read access (`scontrol show`, `squeue`,
-`sacctmgr show`), so run it as an ordinary user: then even a bug could not change
-anything, because Slurm would refuse.
+and changes nothing.
 
 ```sh
 python3 -m sqp.daemon -c etc/sqp.toml --dry-run \
@@ -126,9 +221,16 @@ The table it would have written goes to `<state_dir>/policy.dryrun.lua`, not the
 plugin reads. Limit changes run against a simulated cap, as if every earlier change had
 been applied.
 
-Every state-changing command goes through `slurm.apply()`, which refuses to run
-anything unless the daemon was started in `enforce` mode. So the mode checks are
-backed by a second guard that does not depend on each call site getting them right.
+Nothing in a dry run depends on the account's Slurm permissions. Three guards, each
+enough on its own:
+
+1. Each action checks the mode before it is attempted.
+2. Every state-changing command goes through `slurm.apply()`, which runs nothing
+   unless the daemon was started in `enforce` mode.
+3. Every process sqp starts goes through one function, which outside `enforce` mode
+   refuses anything but `scontrol show`, `squeue` and `sacctmgr show`.
+
+The tests check each guard (sections 10 and 10b of `tests/test_policy.py`).
 
 Caveats. Placement is evaluated against the table as it stood when the job was first
 polled (up to `queue_poll_interval` after submission), not at the exact moment of
