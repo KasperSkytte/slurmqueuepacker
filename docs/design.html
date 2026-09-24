@@ -1,0 +1,1119 @@
+<title>Slurm Queue Packer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap">
+<style>
+:root{
+  color-scheme: light;
+  --bg:#eceff1; --surface:#fbfcfc; --surface-2:#f3f6f7;
+  --ink:#0f1417; --ink-2:#3d4a52; --muted:#71818b;
+  --rule:#d5dde1; --rule-2:#e6ecee;
+  --accent:#1c5cab; --accent-soft:#e3ecf8;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --shadow:0 1px 2px rgba(15,20,23,.06), 0 8px 24px -16px rgba(15,20,23,.28);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#101315; --surface:#181c1f; --surface-2:#1e2327;
+    --ink:#eef3f5; --ink-2:#b0bcc3; --muted:#7d8b93;
+    --rule:#2a3136; --rule-2:#222a2e;
+    --accent:#6da7ec; --accent-soft:#1a2836;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#101315; --surface:#181c1f; --surface-2:#1e2327;
+  --ink:#eef3f5; --ink-2:#b0bcc3; --muted:#7d8b93;
+  --rule:#2a3136; --rule-2:#222a2e;
+  --accent:#6da7ec; --accent-soft:#1a2836;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+}
+*{box-sizing:border-box}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+  font-size:16.5px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px 96px}
+.col{max-width:66ch}
+h1,h2,h3,.ui{font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif}
+code,kbd,.mono{font-family:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace}
+
+/* ---------- masthead ---------- */
+header.mast{padding:72px 0 40px;border-bottom:1px solid var(--rule)}
+.eyebrow{font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;font-weight:600;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--accent);margin:0 0 18px}
+h1{font-size:clamp(34px,5.2vw,52px);line-height:1.05;font-weight:600;letter-spacing:-.022em;
+  margin:0 0 18px;text-wrap:balance}
+.standfirst{font-size:19px;line-height:1.55;color:var(--ink-2);margin:0;max-width:60ch}
+.meta{display:flex;flex-wrap:wrap;gap:8px 28px;margin-top:28px;
+  font-family:"IBM Plex Sans",sans-serif;font-size:12.5px;color:var(--muted)}
+.meta b{color:var(--ink-2);font-weight:500}
+
+/* ---------- sections ---------- */
+section{padding-top:56px}
+h2{font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 6px;display:flex;align-items:baseline;gap:12px}
+h2 .n{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--accent);
+  font-weight:500;letter-spacing:0}
+h3{font-size:26px;font-weight:600;letter-spacing:-.015em;line-height:1.22;
+  margin:0 0 20px;text-wrap:balance}
+h4{font-family:"IBM Plex Sans",sans-serif;font-size:16px;font-weight:600;
+  margin:32px 0 10px;letter-spacing:-.005em}
+p{margin:0 0 18px}
+strong{font-weight:600}
+em.term{font-style:italic;color:var(--ink)}
+a{color:var(--accent)}
+ul,ol{margin:0 0 18px;padding-left:22px}
+li{margin-bottom:9px}
+li::marker{color:var(--muted)}
+hr.rule{border:0;border-top:1px solid var(--rule);margin:0}
+
+/* ---------- pull figure ---------- */
+.headline{
+  background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+  padding:30px 32px;margin:0 0 30px;box-shadow:var(--shadow);
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:26px 34px;
+}
+.stat .v{font-family:"IBM Plex Sans",sans-serif;font-size:34px;font-weight:600;
+  letter-spacing:-.03em;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
+.stat .v.hot{color:var(--s2)}
+.stat .k{font-family:"IBM Plex Sans",sans-serif;font-size:12.5px;color:var(--muted);
+  margin-top:9px;line-height:1.4}
+
+/* ---------- code ---------- */
+pre{background:var(--surface-2);border:1px solid var(--rule-2);border-left:2px solid var(--accent);
+  border-radius:2px;padding:16px 18px;overflow-x:auto;margin:0 0 20px;
+  font-size:12.8px;line-height:1.62}
+pre code{color:var(--ink-2)}
+p code,li code,td code{background:var(--surface-2);border:1px solid var(--rule-2);
+  border-radius:2px;padding:.5px 5px;font-size:.855em;color:var(--ink)}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto;margin:0 0 22px;border:1px solid var(--rule);border-radius:3px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-family:"IBM Plex Sans",sans-serif;font-size:13.5px}
+th,td{padding:9px 14px;text-align:left;border-bottom:1px solid var(--rule-2)}
+thead th{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);
+  font-weight:600;background:var(--surface-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.mono{font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+tr.total td{font-weight:600;background:var(--surface-2)}
+
+/* ---------- charts ---------- */
+figure{margin:0 0 30px}
+figcaption{font-family:"IBM Plex Sans",sans-serif;font-size:12.5px;color:var(--muted);
+  line-height:1.5;margin-top:12px;max-width:70ch}
+figcaption b{color:var(--ink-2);font-weight:500}
+.chart{background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:24px 26px 20px}
+.ctitle{font-family:"IBM Plex Sans",sans-serif;font-size:14.5px;font-weight:600;
+  margin:0 0 4px;color:var(--ink)}
+.csub{font-family:"IBM Plex Sans",sans-serif;font-size:12.5px;color:var(--muted);margin:0 0 20px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 20px;margin:0 0 18px;
+  font-family:"IBM Plex Sans",sans-serif;font-size:12px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.sw{width:11px;height:11px;border-radius:2px;flex:none}
+
+/* stacked rows */
+.srow{display:grid;grid-template-columns:60px 1fr;gap:14px;align-items:center;margin-bottom:11px}
+.srow .lab{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-2);text-align:right}
+.bar{display:flex;height:30px;border-radius:2px;overflow:hidden;gap:2px;background:transparent}
+.seg{display:flex;align-items:center;justify-content:center;min-width:0;
+  font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;font-weight:600;color:#fff;
+  font-variant-numeric:tabular-nums;border-radius:2px}
+.seg.dk{color:#08211a}
+
+/* vertical columns */
+.cols{display:grid;gap:8px;align-items:end;grid-auto-flow:column;grid-auto-columns:1fr;
+  height:190px;padding-top:16px}
+.colg{display:flex;flex-direction:column;justify-content:flex-end;height:100%;gap:6px;min-width:0}
+.colv{font-family:"IBM Plex Sans",sans-serif;font-size:11px;font-weight:600;color:var(--ink-2);
+  text-align:center;font-variant-numeric:tabular-nums}
+.colb{border-radius:3px 3px 1px 1px;background:var(--s1);min-height:2px}
+.colb.hot{background:var(--s2)}
+.xlab{display:grid;gap:8px;grid-auto-flow:column;grid-auto-columns:1fr;margin-top:10px;
+  border-top:1px solid var(--rule);padding-top:9px}
+.xlab div{font-family:"IBM Plex Sans",sans-serif;font-size:10.5px;color:var(--muted);
+  text-align:center;line-height:1.3;overflow-wrap:anywhere}
+
+/* ---------- callouts ---------- */
+.note{border-left:2px solid var(--accent);background:var(--accent-soft);
+  padding:16px 20px;border-radius:0 3px 3px 0;margin:0 0 22px}
+.note p:last-child{margin-bottom:0}
+.note .t{font-family:"IBM Plex Sans",sans-serif;font-size:11.5px;font-weight:600;
+  letter-spacing:.07em;text-transform:uppercase;color:var(--accent);margin:0 0 7px}
+.warn{border-left-color:var(--s2);background:transparent;border:1px solid var(--rule);
+  border-left:2px solid var(--s2)}
+.warn .t{color:var(--s2)}
+
+/* ---------- diagram ---------- */
+.figframe{background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:26px 24px}
+.figframe svg{display:block;width:100%;height:auto;color:var(--ink-2)}
+
+/* ---------- decision list ---------- */
+.dl{border-top:1px solid var(--rule);margin:0 0 22px}
+.dl .row{display:grid;grid-template-columns:132px 1fr;gap:20px;
+  padding:14px 0;border-bottom:1px solid var(--rule-2)}
+.dl .k{font-family:"IBM Plex Sans",sans-serif;font-size:12.5px;font-weight:600;color:var(--ink)}
+.dl .d{font-size:15px;color:var(--ink-2);line-height:1.55}
+.dl .d p{margin:0}
+@media(max-width:560px){.dl .row{grid-template-columns:1fr;gap:5px}}
+
+footer{margin-top:72px;padding-top:26px;border-top:1px solid var(--rule);
+  font-family:"IBM Plex Sans",sans-serif;font-size:12.5px;color:var(--muted)}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="col">
+    <p class="eyebrow">Design document &middot; draft 1</p>
+    <h1>Slurm Queue Packer</h1>
+    <p class="standfirst">A state-aware partition-placement supplement for Slurm. It does not
+    replace the scheduler, reorder the queue, or touch fair-share &mdash; it decides only which
+    partitions a job is <em class="term">allowed</em> to land in, and it decides that from what the
+    cluster looks like right now.</p>
+    <div class="meta">
+      <span><b>Cluster</b> biocloud &middot; 17 nodes &middot; 3,872 CPUs &middot; 22.8 TB</span>
+      <span><b>Evidence</b> 2,387,825 jobs, Nov 2023 &ndash; Sep 2026</span>
+      <span><b>Slurm</b> 24.11.4</span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="col">
+    <h2><span class="n">01</span> The measurement that started this</h2>
+    <h3>The high-memory partitions are not overloaded. They are being fed jobs that do not belong there.</h3>
+  </div>
+
+  <div class="headline">
+    <div class="stat"><div class="v">38,342</div><div class="k">jobs with a high memory-per-CPU ratio that waited more than 5 minutes, over 329 days</div></div>
+    <div class="stat"><div class="v">2 CPU / 49 GB</div><div class="k">their median request</div></div>
+    <div class="stat"><div class="v hot">99.0%</div><div class="k">could have started immediately on a slim-partition node at the moment they became eligible</div></div>
+    <div class="stat"><div class="v hot">103,751</div><div class="k">job-hours they spent waiting</div></div>
+  </div>
+
+  <div class="col">
+    <p>Placement today is one rule in <code>job_submit.lua</code>:</p>
+  </div>
+
+<pre><code>if job_desc.min_mem_per_node / job_desc.min_cpus &lt; 6000 then
+    job_desc.partition = "zen5,zen3"      -- slim
+else
+    job_desc.partition = "zen5x,zen3x"    -- fat
+end</code></pre>
+
+  <div class="col">
+    <p>It routes on the <strong>memory-per-CPU ratio alone and never looks at the absolute
+    footprint</strong>. A job asking for 1 CPU and 32 GB has a ratio of 32,768 MB/CPU, so it is sent
+    to the two high-memory partitions &mdash; 1,024 of the cluster&rsquo;s 3,520 batch CPUs &mdash;
+    where it queues behind other jobs that also do not need to be there. 32 GB fits on every node in
+    the cluster.</p>
+
+    <p>Among the 38,342 that waited: <strong>47.2% asked for a single CPU</strong> and 45.6% asked
+    for 16&ndash;64 GB. Only 0.3% requested more than 1 TB, the point at which a zen3 node genuinely
+    cannot hold them.</p>
+
+    <div class="note">
+      <p class="t">The conflation</p>
+      <p><strong>Feasibility is absolute</strong> &mdash; does this job&rsquo;s memory fit inside a
+      node? <strong>Fit quality is a ratio</strong> &mdash; does consuming it leave the node&rsquo;s
+      remaining CPUs and memory in usable proportion? The current rule uses the ratio to answer both
+      questions, and the ratio cannot answer the first one.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2><span class="n">02</span> Diagnosis</h2>
+    <h3>Right on average, wrong at every individual moment</h3>
+    <p>Over the 329 days since the zen* partition layout went in (571,248 jobs), demand above the
+    6,000 MB/CPU threshold accounts for <strong>28.5% of CPU-hours</strong>. The two high-memory
+    partitions hold <strong>29.1% of batch CPUs</strong>. The static split is almost exactly right
+    as a long-run average &mdash; and it still fails, because the mismatch is temporal, not
+    structural. That is the entire case for making the decision dynamic.</p>
+  </div>
+
+  <figure>
+    <div class="chart">
+      <p class="ctitle">Where the waiting jobs would actually have fit</p>
+      <p class="csub">Total memory requested by the 38,342 high-ratio jobs that waited more than 5 minutes</p>
+      <div class="legend">
+        <span><i class="sw" style="background:var(--s1)"></i> Fits a zen3 node (1.0 TB)</span>
+        <span><i class="sw" style="background:var(--s2)"></i> Genuinely needs a high-memory node</span>
+      </div>
+      <div class="cols">
+        <div class="colg"><div class="colv">10.3%</div><div class="colb" style="height:22.6%" title="&lt; 16 GB — 3,961 jobs"></div></div>
+        <div class="colg"><div class="colv">45.6%</div><div class="colb" style="height:100%" title="16–64 GB — 17,470 jobs"></div></div>
+        <div class="colg"><div class="colv">7.6%</div><div class="colb" style="height:16.7%" title="64–128 GB — 2,911 jobs"></div></div>
+        <div class="colg"><div class="colv">30.2%</div><div class="colb" style="height:66.4%" title="128–256 GB — 11,595 jobs"></div></div>
+        <div class="colg"><div class="colv">4.9%</div><div class="colb" style="height:10.8%" title="256–512 GB — 1,885 jobs"></div></div>
+        <div class="colg"><div class="colv">1.1%</div><div class="colb" style="height:2.4%" title="512 GB – 1 TB — 414 jobs"></div></div>
+        <div class="colg"><div class="colv">0.2%</div><div class="colb hot" style="height:0.5%" title="1–1.5 TB — 82 jobs"></div></div>
+        <div class="colg"><div class="colv">0.1%</div><div class="colb hot" style="height:0.2%" title="&gt; 1.5 TB — 24 jobs"></div></div>
+      </div>
+      <div class="xlab">
+        <div>&lt; 16 GB</div><div>16–64 GB</div><div>64–128 GB</div><div>128–256 GB</div>
+        <div>256–512 GB</div><div>512 GB–1 TB</div><div>1–1.5 TB</div><div>&gt; 1.5 TB</div>
+      </div>
+    </div>
+    <figcaption><b>99.7% of them fit inside a single zen3 node.</b> They were routed to the
+    high-memory partitions purely because their memory-per-CPU ratio exceeded 6,000 MB/CPU.</figcaption>
+  </figure>
+
+  <figure>
+    <div class="chart">
+      <p class="ctitle">Where the CPU allocation-hours went</p>
+      <p class="csub">329 days &times; each partition&rsquo;s CPU count. &ldquo;Stranded&rdquo; means idle CPUs whose node had
+      too little memory left per idle CPU to accept a median job (4,267 MB/CPU). Bars are
+      allocation-hours, not work delivered &mdash; see &sect;03.</p>
+      <div class="legend">
+        <span><i class="sw" style="background:var(--s1)"></i> Allocated to jobs</span>
+        <span><i class="sw" style="background:var(--s3)"></i> Idle and usable</span>
+        <span><i class="sw" style="background:var(--s2)"></i> Idle but stranded</span>
+      </div>
+      <div class="srow"><div class="lab">zen3</div><div class="bar">
+        <div class="seg" style="background:var(--s1);flex:42.39" title="Allocated 4,712,948 CPU-h">42.4%</div>
+        <div class="seg dk" style="background:var(--s3);flex:49.33" title="Idle and usable 5,484,539 CPU-h">49.3%</div>
+        <div class="seg" style="background:var(--s2);flex:8.28" title="Stranded 920,081 CPU-h">8.3%</div></div></div>
+      <div class="srow"><div class="lab">zen5</div><div class="bar">
+        <div class="seg" style="background:var(--s1);flex:55.77" title="Allocated 4,791,319 CPU-h">55.8%</div>
+        <div class="seg dk" style="background:var(--s3);flex:42.31" title="Idle and usable 3,634,720 CPU-h">42.3%</div>
+        <div class="seg" style="background:var(--s2);flex:1.92" title="Stranded 164,809 CPU-h">1.9%</div></div></div>
+      <div class="srow"><div class="lab">zen3x</div><div class="bar">
+        <div class="seg" style="background:var(--s1);flex:40.72" title="Allocated 1,440,532 CPU-h">40.7%</div>
+        <div class="seg dk" style="background:var(--s3);flex:46.80" title="Idle and usable 1,655,314 CPU-h">46.8%</div>
+        <div class="seg" style="background:var(--s2);flex:12.48" title="Stranded 441,562 CPU-h">12.5%</div></div></div>
+      <div class="srow"><div class="lab">zen5x</div><div class="bar">
+        <div class="seg" style="background:var(--s1);flex:48.83" title="Allocated 2,220,884 CPU-h">48.8%</div>
+        <div class="seg dk" style="background:var(--s3);flex:36.67" title="Idle and usable 1,668,005 CPU-h">36.7%</div>
+        <div class="seg" style="background:var(--s2);flex:14.49" title="Stranded 659,207 CPU-h">14.5%</div></div></div>
+    </div>
+    <figcaption>The high-memory partitions strand three to seven times the share that zen5 does:
+    their CPUs sit idle because their memory is gone. <b>2.23 million allocation-hours stranded in total &mdash;
+    7.3% of cluster capacity</b> at median demand, 18.9% if measured against p75 demand.</figcaption>
+  </figure>
+
+  <figure>
+    <div class="chart">
+      <p class="ctitle">Requested memory per CPU</p>
+      <p class="csub">Share of the 571,248 jobs in the zen* era, by requested MB per CPU</p>
+      <div class="legend">
+        <span><i class="sw" style="background:var(--s1)"></i> Routed to slim partitions</span>
+        <span><i class="sw" style="background:var(--s2)"></i> Routed to high-memory partitions</span>
+      </div>
+      <div class="cols">
+        <div class="colg"><div class="colv">20.0%</div><div class="colb" style="height:68.5%" title="&lt; 1 GB/CPU — 114,041 jobs"></div></div>
+        <div class="colg"><div class="colv">17.2%</div><div class="colb" style="height:58.9%" title="1–2 GB/CPU — 98,497 jobs"></div></div>
+        <div class="colg"><div class="colv">12.0%</div><div class="colb" style="height:41.1%" title="2–4 GB/CPU — 68,281 jobs"></div></div>
+        <div class="colg"><div class="colv">29.2%</div><div class="colb" style="height:100%" title="4–6 GB/CPU — 166,531 jobs"></div></div>
+        <div class="colg"><div class="colv">1.5%</div><div class="colb hot" style="height:5.1%" title="6–8 GB/CPU — 8,487 jobs"></div></div>
+        <div class="colg"><div class="colv">5.6%</div><div class="colb hot" style="height:19.2%" title="8–12 GB/CPU — 32,114 jobs"></div></div>
+        <div class="colg"><div class="colv">1.4%</div><div class="colb hot" style="height:4.8%" title="12–24 GB/CPU — 8,222 jobs"></div></div>
+        <div class="colg"><div class="colv">13.1%</div><div class="colb hot" style="height:45.1%" title="&gt; 24 GB/CPU — 75,075 jobs"></div></div>
+      </div>
+      <div class="xlab">
+        <div>&lt;1 GB</div><div>1–2</div><div>2–4</div><div>4–6</div>
+        <div>6–8</div><div>8–12</div><div>12–24</div><div>&gt;24 GB</div>
+      </div>
+    </div>
+    <figcaption>The 6,000 MB/CPU threshold sits in a real valley &mdash; only 1.5% of jobs land in
+    6&ndash;8 GB/CPU &mdash; so it is a good <b>ratio</b> boundary. The problem is the
+    13.1% above 24 GB/CPU: nearly all of them are small jobs with few CPUs, and the ratio test
+    cannot tell them apart from the ones that really need 2 TB.</figcaption>
+  </figure>
+
+  <div class="col">
+    <h4>Three supporting facts from the same window</h4>
+  </div>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Measurement</th><th class="num">Value</th><th>Consequence for the design</th></tr></thead>
+      <tbody>
+        <tr><td>Walltime actually used, median job</td><td class="num">2.0%</td>
+            <td>Requested time limits are near-useless as backfill input; predict runtime instead</td></tr>
+        <tr><td>Walltime used, CPU-hour weighted median</td><td class="num">27.9%</td>
+            <td>Even weighted by size, the queue&rsquo;s view of the future is 3&ndash;4&times; too long</td></tr>
+        <tr><td>Requested memory actually touched, median job</td><td class="num">19.8%</td>
+            <td>28.5% of GB-hours are reserved and never used &mdash; but cgroups make it unsafe to reclaim</td></tr>
+        <tr><td>Jobs finishing in under 5 minutes</td><td class="num">56.2%</td>
+            <td>Huge population of trivial jobs; they are only 3.9% of CPU-hours but they saturate the backfill scan</td></tr>
+        <tr><td>Aggregate CPU efficiency of allocated cores</td><td class="num">62.6%</td>
+            <td>Deliberately not scored &mdash; see below. Allocation is what denies hardware to other people.</td></tr>
+        <tr><td>Jobs in a &ge;50-member identical-shape cohort</td><td class="num">39.2%</td>
+            <td>Cohort throttling must work on shape, not just on job arrays</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <h4>The unit is the allocation-hour, and it is not the same as work</h4>
+    <p>Everything the accounting database records is <strong>allocation</strong>:
+    <code>cpus_req &times; elapsed</code> is the CPU-time a job was <em class="term">given</em>, not the
+    CPU-time it <em class="term">used</em>. Under <code>ConstrainCores=yes</code> those cores are
+    genuinely unavailable to anyone else, so allocation is the right unit for scheduling &mdash; but
+    it is the wrong unit for throughput. A job that allocates 400 CPU-hours at 25% efficiency
+    delivered 100 CPU-hours of work.</p>
+    <p>Measured over the zen* era, on the 345,350 jobs with usable step accounting:</p>
+  </div>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Resource</th><th class="num">Allocated</th><th class="num">Actually used</th><th class="num">Lost</th></tr></thead>
+      <tbody>
+        <tr><td>CPU</td><td class="num">13,342,631 h</td><td class="num">8,351,142 h</td><td class="num">37.4%</td></tr>
+        <tr><td>Memory</td><td class="num">72,316,983 GB-h</td><td class="num">51,749,660 GB-h</td><td class="num">28.4%</td></tr>
+        <tr class="total"><td>Walltime, had jobs run to their limit</td><td class="num">132,597,171 CPU-h</td><td class="num">13,342,631 CPU-h</td><td class="num">9.9&times; over</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <div class="note">
+      <p class="t">Why CPU efficiency is not in the objective</p>
+      <p>4,991,489 allocation-hours are held by jobs that are not using them &mdash; 2.2&times; what
+      memory shape strands. It is tempting to score that. <strong>We deliberately do not.</strong>
+      What matters to everyone else on the cluster is that the hardware is
+      <em class="term">reserved</em> and therefore unavailable; whether the owner is using it is
+      their business. Nothing here can be 100% efficient &mdash; multi-step bioinformatics workflows
+      have serial and I/O-bound phases that no scheduler can help &mdash; and scoring efficiency
+      would penalise users for the shape of their science.</p>
+    </div>
+
+    <p>So the unit is the allocation-hour, for CPU and for memory, and that is the whole of it.</p>
+
+    <p><strong>The one efficiency that does matter is time.</strong> Users overshoot their limits by
+    roughly 7&times;, and admins extend limits by hand because a job killed at its limit is wasted
+    work. That pessimism is what Slurm&rsquo;s backfill plans against. A cohort-p95 estimate over
+    <code>(user, name, cpus, mem)</code> &mdash; 1,848 cohorts covering 46.2% of jobs &mdash; shrinks
+    the planning horizon to <strong>21.7% of the declared limits</strong>, with 6.3% of jobs
+    outliving the estimate and a <strong>median overrun of two minutes</strong>. Section 05 says what
+    that is and is not good for.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2><span class="n">03</span> Objective</h2>
+    <h3>Maximise work completed per unit time, not packing density</h3>
+    <p>Packing is a means. The thing being maximised is throughput: how much data the cluster
+    processes per unit time, subject to fair-share and a bounded wait for every class of job.
+    Written as something a program can score:</p>
+
+    <div class="note">
+      <p class="t">Objective</p>
+      <p><strong>Minimise queue time; maximise CPU and memory allocation-hours</strong>, weighted
+      by node speed, subject to (a) fair-share ordering being left to Slurm, and (b) no job class
+      exceeding its historical wait budget.</p>
+    </div>
+
+    <p>Three consequences follow immediately, and the third is the interesting one.</p>
+
+    <p><strong>A CPU is not a CPU.</strong> A zen5 core does more work per second than a zen3 core,
+    so stranding one costs more. This is already expressed in the PriorityTier ordering and the
+    packer should not fight it.</p>
+
+    <p><strong>Faster hardware is always preferable.</strong> A job&rsquo;s work is fixed before it
+    is placed, so finishing it on a quicker node returns both the cores and the memory sooner. That is
+    already expressed in the PriorityTier ordering, and the packer does not fight it.</p>
+
+    <h4>The idle-cluster case, and why it needs no special rule</h4>
+
+    <p>When the cluster is empty, any placement is free right now, and yet placing carelessly is
+    still wrong: a 1-CPU/900 GB job dropped on an empty zen3 node destroys that node&rsquo;s ability
+    to host anything else for the duration. The cost is not present waste, it is
+    <strong>lost option value</strong>.</p>
+
+    <p>Make that the whole score. Let <em class="term">&Phi;(state)</em> be the
+    <strong>placeable capacity</strong>: the expected CPU-hours of future demand the cluster could
+    still absorb, computed by greedily packing the measured demand distribution into the current free
+    shapes. The cost of putting job <em>j</em> in partition <em>p</em> is</p>
+
+<pre><code>cost(j, p) = [ &Phi;(before) &minus; &Phi;(after) ] &minus; speed(p) &times; cpus(j)
+             \_______ option value destroyed _______/   \__ work started __/</code></pre>
+
+    <p>and the packer picks the feasible set that minimises it. No mode switch, no
+    &ldquo;busy vs. idle&rdquo; flag, no tuning knob for cold start &mdash; the behaviour falls out
+    of the same expression:</p>
+
+    <ul>
+      <li><strong>Idle cluster:</strong> &Phi; is large, so destroying it dominates. The packer
+      places ratio-matched, exactly as you would by hand &mdash; it will not put a high-ratio job on
+      an empty slim node, and it will not burn fat-node CPUs on jobs that do not need the memory.</li>
+      <li><strong>Busy cluster:</strong> &Phi; is already near zero, so nothing is left to protect
+      and the work term dominates. The packer fills whatever hole exists, which is the right
+      behaviour when the future has already arrived.</li>
+      <li><strong>Short jobs:</strong> a job that returns its resources within the hour barely
+      dents &Phi;, so short jobs are admitted almost anywhere &mdash; which is what you want, and
+      what backfill is already trying to do.</li>
+    </ul>
+
+    <p>&Phi; is evaluated over a horizon rather than instantaneously, using <em class="term">predicted</em>
+    end times of the running jobs. That is what stops a 14-day job being placed into a hole that
+    closes tomorrow.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2><span class="n">04</span> Architecture</h2>
+    <h3>Decide slowly out of band, apply instantly in band</h3>
+    <p>Slurm&rsquo;s Lua job-submit plugin cannot see cluster state. Checking
+    <code>src/lua/slurm_lua.c</code> at the 24.11.4 tag: it registers the logging helpers,
+    <code>time_str2mins</code>, <code>get_qos_priority</code>, and the fields of the job record being
+    submitted. There is no handle on running jobs, node occupancy, or the pending queue. The plugin
+    also runs synchronously inside <code>slurmctld</code> &mdash; every millisecond spent there is a
+    millisecond the controller is not accepting the next submission.</p>
+    <p>So the decision is precomputed by a daemon and the plugin only performs a lookup.</p>
+  </div>
+
+  <figure>
+    <div class="figframe">
+      <svg viewBox="0 0 860 400" role="img" aria-label="Two-plane architecture: a synchronous submit path where job_submit.lua reads a precomputed policy table, and an asynchronous control loop where the sqpd daemon polls cluster state and rewrites that table.">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="ahA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#eb6834"/>
+          </marker>
+        </defs>
+
+        <text x="0" y="14" font-family="IBM Plex Sans, sans-serif" font-size="11" font-weight="600" fill="currentColor" letter-spacing="1.4">SUBMIT PATH — SYNCHRONOUS, INSIDE SLURMCTLD</text>
+        <rect x="0" y="26" width="860" height="112" rx="3" fill="none" stroke="currentColor" stroke-opacity=".22"/>
+
+        <rect x="20" y="58" width="104" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="72" y="86" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">sbatch</text>
+
+        <line x1="130" y1="81" x2="180" y2="81" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+
+        <rect x="186" y="58" width="120" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="246" y="86" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">slurmctld</text>
+
+        <line x1="312" y1="81" x2="362" y2="81" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+
+        <rect x="368" y="52" width="164" height="58" rx="3" fill="none" stroke="#eb6834" stroke-width="1.6"/>
+        <text x="450" y="76" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">job_submit.lua</text>
+        <text x="450" y="95" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="currentColor" opacity=".7">one table lookup</text>
+
+        <line x1="538" y1="81" x2="596" y2="81" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+        <text x="567" y="72" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10" fill="currentColor" opacity=".75">sets</text>
+
+        <rect x="602" y="58" width="150" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="677" y="80" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">partition=</text>
+        <text x="677" y="95" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">zen3,zen5x</text>
+
+        <line x1="758" y1="81" x2="820" y2="81" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+        <text x="838" y="85" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="11" fill="currentColor">queue</text>
+
+        <rect x="368" y="168" width="164" height="52" rx="3" fill="none" stroke="#eb6834" stroke-width="1.6" stroke-dasharray="0"/>
+        <text x="450" y="189" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="#eb6834">policy.lua</text>
+        <text x="450" y="206" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10" fill="currentColor" opacity=".7">~300 rows, on tmpfs</text>
+
+        <line x1="450" y1="164" x2="450" y2="116" stroke="#eb6834" stroke-width="1.6" marker-end="url(#ahA)"/>
+        <text x="462" y="142" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="currentColor" opacity=".8">dofile() on mtime change</text>
+
+        <path d="M368 194 L300 194 L300 116" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+        <text x="292" y="148" text-anchor="end" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="currentColor" opacity=".8">missing or stale &rarr;</text>
+        <text x="292" y="162" text-anchor="end" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="currentColor" opacity=".8">today&rsquo;s static rule</text>
+
+        <text x="0" y="264" font-family="IBM Plex Sans, sans-serif" font-size="11" font-weight="600" fill="currentColor" letter-spacing="1.4">CONTROL LOOP — ASYNCHRONOUS, SEPARATE PROCESS</text>
+        <rect x="0" y="276" width="860" height="112" rx="3" fill="none" stroke="currentColor" stroke-opacity=".22"/>
+
+        <rect x="20" y="306" width="150" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="95" y="328" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor">scontrol / squeue</text>
+        <text x="95" y="344" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10" fill="currentColor" opacity=".7">--json</text>
+
+        <line x1="176" y1="332" x2="228" y2="332" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+        <text x="202" y="323" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10" fill="currentColor" opacity=".75">20s</text>
+
+        <rect x="234" y="300" width="180" height="64" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="324" y="322" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">sqpd</text>
+        <text x="324" y="339" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="currentColor" opacity=".7">free shapes &rarr; &Phi; &rarr; score</text>
+        <text x="324" y="354" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="currentColor" opacity=".7">runtime prediction</text>
+
+        <path d="M420 316 L470 316 L470 226" fill="none" stroke="#eb6834" stroke-width="1.6" marker-end="url(#ahA)"/>
+        <text x="482" y="270" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="currentColor" opacity=".8">atomic rename</text>
+
+        <line x1="420" y1="348" x2="520" y2="348" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+
+        <rect x="526" y="300" width="230" height="64" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="641" y="321" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="10.5" fill="currentColor" opacity=".85">acts on PENDING jobs only</text>
+        <text x="641" y="338" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="currentColor">scontrol update partition=</text>
+        <text x="641" y="353" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="currentColor">arraytaskthrottle= · MaxTRESPU</text>
+
+        <line x1="762" y1="332" x2="820" y2="332" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+        <text x="838" y="336" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="11" fill="currentColor">queue</text>
+      </svg>
+    </div>
+    <figcaption>The two planes share exactly one artifact: a small Lua table on tmpfs. The submit
+    path never blocks on the daemon, and <b>if the daemon stops, the plugin falls through to today&rsquo;s
+    static rule on the next submission.</b></figcaption>
+  </figure>
+
+  <div class="col">
+    <p>The table is emitted <em class="term">as Lua source</em> &mdash; <code>return {v=7,t={...}}</code>
+    &mdash; so the plugin parses it with the interpreter it already has. No JSON library, no new
+    dependency, no parsing code to get wrong. It is keyed by
+    (memory-per-CPU bucket &times; CPU bucket &times; walltime bucket), roughly 300 rows, and re-read
+    only when its mtime changes. Everything in the plugin is wrapped in <code>pcall</code>; a plugin
+    that throws would reject a user&rsquo;s job.</p>
+
+    <h4>Cadence</h4>
+    <p>The scorer runs at <strong>1 Hz</strong>. What it polls at 1 Hz matters more than the number:
+    <code>scontrol show nodes --json</code> over 17 nodes is a small payload and is what determines
+    the free shapes, so it is cheap enough to poll every second. <code>squeue --json</code> over a
+    queue of thousands serialises every job record and takes a job-table read lock &mdash; at 1 Hz
+    that would contend with the deeper backfill this design also asks for &mdash; so the pending
+    queue is polled every 5&ndash;10 s. The policy table is written only when its content hash
+    changes, so its mtime does not churn and the submit path re-reads it rarely.</p>
+
+    <p>Threads are for <strong>I/O overlap, not parallel compute</strong>. Scoring is roughly 300
+    buckets &times; 4 partitions &times; 17 nodes, single-digit milliseconds; throwing cores at it
+    would achieve nothing, and the GIL would prevent it anyway. Four threads: a node poller, a queue
+    poller, the scorer, and an actor that issues <code>scontrol update</code> under a hard rate limit
+    &mdash; never rewriting a pending job&rsquo;s partitions every second, which would churn
+    slurmctld and re-fire the <code>job_modify</code> hook. The replay harness is where many cores
+    genuinely pay, and it is parallel across windows and policies.</p>
+
+    <div class="note warn">
+      <p class="t">Constraint that shapes the design</p>
+      <p>For a job listing several partitions, Slurm evaluates them in <strong>PriorityTier order,
+      not list order</strong>. The packer therefore cannot rank partitions per job &mdash; it can
+      only choose the feasible <em class="term">set</em>, and must prune to a single partition when
+      it needs to override the tier. <b>Tiers order; the packer gates.</b></p>
+      <p style="margin-top:10px">Worth noting that biocloud&rsquo;s tiers are
+      <code>zen5=10, zen3=9, zen5x=8, zen3x=7</code>. Pure hardware speed would put zen5x level with
+      zen5, since both are Zen 5. Placing zen3 above zen5x means the tiers already encode
+      &ldquo;save the high-memory nodes for jobs that need them&rdquo; &mdash; a placement policy, not
+      just a speed ordering.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2><span class="n">05</span> Policy</h2>
+    <h3>Four mechanisms, in order of blast radius</h3>
+  </div>
+
+  <div class="dl">
+    <div class="row"><div class="k">Partition sets</div><div class="d"><p>Replaces the six-line rule
+      at submit time with the precomputed lookup. Reversible per submission; no effect on work already queued.</p></div></div>
+    <div class="row"><div class="k">Re-placement</div><div class="d"><p><code>scontrol update jobid=… partition=…</code>
+      on PENDING jobs only, never running ones. This is the manual operation being automated.</p></div></div>
+    <div class="row"><div class="k">Cohort throttling</div><div class="d"><p>Caps how much of the queue one
+      job shape may occupy. Covers job arrays via <code>arraytaskthrottle</code>, and
+      <em class="term">non-array cohorts</em> &mdash; workflow engines submitting thousands of separate
+      but identical jobs &mdash; by narrowing their partition set instead.</p></div></div>
+    <div class="row"><div class="k">Elastic limits</div><div class="d"><p>Moves <code>MaxTRESPU</code> on a
+      flex QOS between a floor and a ceiling as cluster pressure changes, so limits relax over holidays
+      and tighten when contended. Hysteresis and rate-limiting required. Highest blast radius &mdash;
+      and, per the replay below, the binding constraint the moment placement is fixed.</p></div></div>
+  </div>
+
+  <div class="col">
+    <div class="note warn">
+      <p class="t">Fixing placement moves the bottleneck, it does not remove it</p>
+      <p>Instrumenting <em class="term">why</em> jobs sit in the replay, over the busy window:</p>
+    </div>
+  </div>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Policy</th><th class="num">Blocked by resources</th><th class="num">Blocked by the QOS cap</th></tr></thead>
+      <tbody>
+        <tr><td>Current static rule</td><td class="num">20,541 job-h</td><td class="num">5,464 job-h</td></tr>
+        <tr><td><code>feasible</code></td><td class="num">234 job-h</td><td class="num">9,969 job-h</td></tr>
+        <tr><td><code>packer</code></td><td class="num">323 job-h</td><td class="num">10,035 job-h</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <p>Placement removes <strong>98.5% of resource-blocking</strong>. What remains is almost entirely
+    <code>MaxTRESPU=cpu=864</code>. Elastic limits therefore move up the roadmap: they are last to be
+    enabled because of blast radius, not because they matter least.</p>
+
+    <h4>Elastic relief: one job at a time, never a global limit</h4>
+
+    <p>The caps exist to stop one user swallowing the cluster inside a minute. They are not a
+    rationing scheme, so the right relief is not to raise them but to step around them, case by
+    case, when capacity is genuinely idle.</p>
+
+    <p>Raising <code>MaxTRESPU</code> globally does the opposite. Every cap-blocked job across all
+    200 users becomes eligible in the same scheduling cycle; with 14-day limits and no preemption,
+    whoever happens to be at the front holds that hardware for days. It recreates precisely the
+    failure the cap prevents, at the moment you believed the cluster was quiet. It is also one
+    irreversible decision taken from a single pressure estimate.</p>
+
+    <p>There are two ways to do that, and the replay says they trade against each other.</p>
+
+    <p><strong>Global (the default).</strong> Raise <code>MaxTRESPU</code> and
+    <code>MaxTRESPA</code> on the <code>normal</code> QOS, uniformly, while the cluster is
+    persistently idle &mdash; then snap straight back the moment it is not. Every user faces the
+    same number, so it is fair by construction, and fair-share keeps deciding who fills the room.
+    The controller is deliberately asymmetric: five consecutive idle observations to step up by
+    25%, one busy observation to return to base. Slow to give and quick to take back is the safe
+    direction, because jobs are not preemptible and a cap that is briefly too high can commit nodes
+    for days.</p>
+
+    <p><strong>Per-job.</strong> <code>scontrol update jobid=&lt;id&gt; qos=flex</code> on one
+    pending job at a time, into a QOS differing from <code>normal</code> only in its cap
+    (<code>Priority=0</code>, <code>UsageFactor=1.0</code>, so relief never reorders the queue or
+    changes what fair-share charges). More surgical &mdash; it can only ever affect one named job.</p>
+
+    <div class="tw" style="margin-top:20px">
+      <table>
+        <thead><tr><th>Window</th><th>Relief</th><th class="num">CPU alloc</th>
+          <th class="num">Stranded</th><th class="num">Total wait</th>
+          <th class="num">High-ratio wait</th></tr></thead>
+        <tbody>
+          <tr><td>Busy</td><td>global</td><td class="num">+10.5%</td><td class="num">&minus;0.2%</td>
+              <td class="num">&minus;70.0%</td><td class="num">&minus;74.2%</td></tr>
+          <tr><td></td><td>per-job</td><td class="num">+13.1%</td><td class="num">&minus;4.6%</td>
+              <td class="num">&minus;80.0%</td><td class="num">&minus;44.4%</td></tr>
+          <tr><td>Moderate</td><td>global</td><td class="num">+5.1%</td><td class="num">&minus;2.4%</td>
+              <td class="num">&minus;62.9%</td><td class="num">&minus;98.5%</td></tr>
+          <tr><td></td><td>per-job</td><td class="num">+6.4%</td><td class="num">&minus;6.6%</td>
+              <td class="num">&minus;76.8%</td><td class="num">&minus;94.6%</td></tr>
+          <tr><td>Quiet</td><td>global</td><td class="num">+0.4%</td><td class="num">&minus;35.3%</td>
+              <td class="num">&minus;94.5%</td><td class="num">&minus;100%</td></tr>
+          <tr><td></td><td>per-job</td><td class="num">+0.5%</td><td class="num">&minus;38.8%</td>
+              <td class="num">&minus;95.2%</td><td class="num">&minus;99.9%</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Per-job wins on throughput and on total wait, consistently, by two to three points of
+    allocation and seven to fourteen points of waiting. Global wins on the thing this project set
+    out to fix: <strong>high-ratio jobs wait less under global relief</strong>, decisively so under
+    load (&minus;74.2% against &minus;44.4% in the busy window).</p>
+
+    <p>The reason is structural rather than incidental. Per-job promotion can only ever promote a
+    job that <em class="term">can start immediately</em> &mdash; that is what bounds its rate &mdash;
+    and that condition systematically selects small, easy-to-place work over exactly the large
+    high-ratio jobs that wait longest. Raising the cap for everyone has no such bias. Global is
+    therefore the default, and per-job is kept as the more conservative option for a site that wants
+    relief to touch one named job at a time.</p>
+
+    <p>Four properties do the safety work in either mode:</p>
+    <ul>
+      <li><strong>Asymmetric response.</strong> Global mode needs five consecutive idle
+      observations to step up and one busy observation to snap back; per-job mode only ever promotes
+      a job that can start immediately, which bounds its rate by the rate resources actually free
+      up. Both make the cluster hard to swamp; a one-shot manual limit raise makes it easy.</li>
+      <li><strong>A hard per-user ceiling</strong> of 2&times; the base cap, so even under relief
+      nobody approaches monopolising anything.</li>
+      <li><strong>The same option-value test the packer uses.</strong> A job is promoted only if it
+      destroys no more placeable capacity than the cores it consumes (<code>&Delta;&Phi; &le; cpus</code>).
+      Without this the relief spends exactly the &Phi; the packer accumulated: in the busy window,
+      ungated promotion took stranding from &minus;20.8% to <strong>+57.0%</strong>. Gated, it is
+      &minus;4.6%.</li>
+      <li><strong>The starvation guard and the relief are on the same side.</strong> A job that is
+      both overdue and cap-blocked is the <em class="term">first</em> candidate for promotion, since
+      the cap is why it is overdue. An earlier design vetoed all relief while anything starved; that
+      cost 4 points of allocation and 20 points of wait reduction for no real gain.</li>
+    </ul>
+
+    <p>Demotion is free while a job is pending. What is not reversible is a promoted job that has
+    <em class="term">started</em>: it then holds its resources for its full runtime, up to 14 days.
+    That one-way door is what the ceiling and the &Phi; gate exist to bound, and it is the argument
+    for preferring short predicted runtimes among promotion candidates so the overflow drains
+    quickly when demand returns.</p>
+
+    <p>Global mode needs no association changes and edits one QOS. Per-job mode needs one
+    <code>sacctmgr</code> pass adding <code>flex</code> to the associations, since this site runs
+    <code>AccountingStorageEnforce=qos</code>; its volume is modest and fully auditable at
+    1,186 promotions across a busy fortnight and 4,604 across a quiet one. Global mode spent
+    165&ndash;336 hours of each fortnight above the base cap, never above 2&times;.</p>
+  </div>
+
+  <div class="col">
+    <h4>Cohorts are 39% of the workload</h4>
+    <p>Grouping the zen* era on <code>(user, job_name, cpus_req, mem_mb, timelimit)</code>, 228,331 of
+    581,931 jobs belong to a cohort with 50 or more members. The largest single cohort is
+    <strong>69,589 individually-submitted jobs</strong> of 1 CPU and 4 GB from one user &mdash; not a
+    job array, and therefore invisible to <code>arraytaskthrottle</code>. Cohort identity is that
+    tuple; where scripts are byte-identical, <code>script_hash_inx</code> in the accounting database
+    sharpens it further.</p>
+
+    <h4>Runtime prediction, and what it is actually for</h4>
+    <p>Forecasting <em class="term">which jobs will arrive and when</em> means chasing a workload that
+    changes as new tools appear. Forecasting <em class="term">how long the jobs already running will
+    last</em> is far better posed: a cohort-p95 over <code>(user, name, cpus, mem)</code> shrinks the
+    horizon to 21.7% of declared limits with a median overrun of two minutes. No neural network; a
+    sorted list per cohort, retrained in seconds, behind a one-method interface so a site that wants
+    gradient boosting can swap it.</p>
+
+    <div class="note warn">
+      <p class="t">A negative result worth recording</p>
+      <p>The obvious use &mdash; feeding tighter horizons to backfill so it can overpack &mdash;
+      <strong>buys almost nothing on this cluster</strong>. Replaying with predicted rather than
+      declared reservation horizons moves allocation by at most 0.1%, at both EASY and conservative
+      reservation depth. The reason is the table above: once placement is fixed there are only ~300
+      job-hours of resource-blocking left in a fortnight, so there is nothing for a tighter horizon to
+      unblock. Pessimistic time limits are not what is costing biocloud its throughput. This would not
+      hold on a cluster that is genuinely reservation-bound.</p>
+    </div>
+
+    <p>Prediction stays, for two other jobs. <strong>&Phi;&rsquo;s horizon</strong> &mdash; so a 14-day
+    job is not placed into a hole that closes tomorrow &mdash; and <strong>the elastic-limit
+    controller</strong>, where deciding whether to raise a user&rsquo;s cap now requires knowing when
+    their running jobs will really release CPUs. Declared limits are 7&times; too long to answer that;
+    cohort-p95 is 4.6&times; tighter.</p>
+
+    <p>One thing the packer will not do by default: reducing a pending job&rsquo;s
+    <code>TimeLimit</code> to the prediction would unlock genuine backfill headroom, but it kills the
+    job if the daemon dies before extending it. That stays opt-in, behind an auto-extender that
+    journals every original limit to disk.</p>
+
+    <p>Job arrival rates are used for exactly one thing: a coarse hour-of-week pressure index driving
+    the elastic limits.</p>
+
+    <h4>The starvation guard</h4>
+    <p>A wait budget per job class, set from that class&rsquo;s own historical p90. While a job is
+    inside its budget the packer optimises for throughput. Once it exceeds the budget, the guard
+    widens that job&rsquo;s feasible set and narrows the sets of the cohorts competing with it, until
+    it starts. This is a constraint on the optimiser, not a term in the score &mdash; throughput never
+    gets to trade away a starving job.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2><span class="n">06</span> Non-goals</h2>
+    <h3>What the packer must never do</h3>
+    <ul>
+      <li><strong>Reorder the queue.</strong> Fair-share, contribution-weighted account shares, age
+      and QOS priority stay entirely with Slurm. The packer changes where a job may land, never when
+      it runs relative to others. This is what keeps the blast radius small and the fairness argument
+      trivial.</li>
+      <li><strong>Change a job&rsquo;s requested CPUs or memory.</strong> Under cgroups that turns
+      over-requesting into job failure.</li>
+      <li><strong>Lower a job&rsquo;s time limit.</strong> Predicted runtimes are used internally for
+      scoring only. Setting <code>--time-min</code> would let backfill cut the real limit and kill
+      long jobs; available as an explicit opt-in, off by default.</li>
+      <li><strong>Touch running jobs.</strong> No requeue, no preemption, no cancellation.</li>
+      <li><strong>Replace the scheduler.</strong> Backfill remains responsible for finding the holes.
+      The packer only makes sure the right jobs are eligible for the right holes.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2><span class="n">07</span> Scheduler configuration</h2>
+    <h3>Worth doing before any of this ships</h3>
+    <p><code>bf_max_job_test</code> is unset on biocloud, so it sits at its default of <strong>500</strong>,
+    while <code>bf_max_job_user=100</code>, <code>default_queue_depth=2000</code> and
+    <code>MaxSubmitPU=2000</code>. The manual is explicit that <code>bf_max_job_test</code> should be
+    set much higher than <code>bf_max_job_user</code>. Backfill therefore never looks past the first
+    500 entries &mdash; and with 56% of jobs finishing inside five minutes, those 500 slots turn over
+    constantly on trivial work while a high-memory job sits at position 900 without even an estimated
+    start time.</p>
+    <p>This matters doubly for the packer, because backfill&rsquo;s list is job-<em class="term">partition
+    pairs</em>: every extra partition in a job&rsquo;s list consumes another slot.</p>
+  </div>
+
+<pre><code>SchedulerParameters=batch_sched_delay=10,default_queue_depth=2000,\
+partition_job_depth=500,salloc_wait_nodes,bf_busy_nodes,bf_continue,\
+bf_interval=10,bf_max_job_test=3000,bf_max_job_user=100,\
+bf_max_job_user_part=50,bf_max_job_array_resv=100,bf_max_job_start=100,\
+bf_min_age_reserve=600,bf_one_resv_per_job,bf_resolution=120,\
+bf_window=20160,bf_max_time=30,max_rpc_cnt=150,reduce_completing_frag,\
+sched_min_interval=1000000</code></pre>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Parameter</th><th>Change</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">bf_max_job_test=3000</td><td>500 &rarr; 3000</td><td>The binding constraint. Must also absorb multi-partition lists.</td></tr>
+        <tr><td class="mono">bf_one_resv_per_job</td><td>new</td><td>Without it a multi-partition job reserves in <em>every</em> partition it lists, blocking others where it will never start. Mandatory before widening any list.</td></tr>
+        <tr><td class="mono">bf_min_age_reserve=600</td><td>new</td><td>Don&rsquo;t reserve for jobs pending under 10 min. The config-level expression of throughput-first.</td></tr>
+        <tr><td class="mono">bf_resolution=120</td><td>60 &rarr; 120</td><td>Halves the 20,160-slot planning matrix to pay for the deeper scan. Not 300 &mdash; the median job is 160 s and coarser resolution would hide the gaps short jobs fill.</td></tr>
+        <tr><td class="mono">bf_max_time=30</td><td>new</td><td>Defaults to <code>bf_interval</code> = 10 s, which cannot finish a 3000-job scan.</td></tr>
+        <tr><td class="mono">max_rpc_cnt=150</td><td>new</td><td>The manual&rsquo;s own suggested middle value, so deeper cycles don&rsquo;t starve client RPCs.</td></tr>
+        <tr><td class="mono">bf_max_job_user_part=50</td><td>new</td><td>Stops one cohort monopolising a single partition&rsquo;s backfill slots.</td></tr>
+        <tr><td class="mono">partition_job_depth=500</td><td>new</td><td>Stops the main scheduler spending all 2000 of its depth on one partition.</td></tr>
+        <tr><td class="mono">bf_busy_nodes</td><td>kept</td><td>Already correct and already serving this goal: packs onto busy nodes, leaves idle ones whole for large jobs.</td></tr>
+        <tr><td class="mono">bf_window=20160</td><td>kept</td><td>Must stay at or above the 14-day maximum or long jobs never get a reservation.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <p>Verify against the controller&rsquo;s own <code>man slurm.conf</code> before applying &mdash;
+    these were checked against a 26.05 manual page, while production runs 24.11.4. Apply with
+    <code>scontrol reconfigure</code>; it is reversible and needs no restart.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2><span class="n">08</span> Validation</h2>
+    <h3>Nothing reaches the live cluster until it has been replayed against three years of it</h3>
+
+    <h4>Trace replay</h4>
+    <p>Per-node occupancy at any past instant is fully reconstructible from the accounting database:
+    a job holds <code>node_inx</code> and <code>tres_alloc</code> between <code>time_start</code> and
+    <code>time_end</code>, and is pending between <code>time_eligible</code> and
+    <code>time_start</code>. That is enough to rebuild both the cluster and the queue, minute by
+    minute, for the whole history &mdash; and it is how every number in this document was produced.
+    The replay harness runs a candidate policy against the real arrival trace and reports stranded
+    CPU-hours, wait-time distribution by class, and fair-share drift against the baseline of what
+    actually happened.</p>
+
+    <h4>What the replay says so far</h4>
+    <p>Three 14-day windows, each with four days of warm-up, replayed against a priority-ordered
+    scheduler with per-node backfill reservations computed from <em class="term">declared</em> time
+    limits, and with <code>MaxTRESPU=cpu=864</code> / <code>MaxTRESPA=cpu=1760</code> enforced.
+    Change against the current static rule:</p>
+  </div>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Window</th><th class="num">Load</th><th>Policy</th>
+        <th class="num">CPU alloc-h</th><th class="num">Stranded</th>
+        <th class="num">Total wait</th><th class="num">High-ratio wait</th></tr></thead>
+      <tbody>
+        <tr><td>Busy (Mar)</td><td class="num">66.5%</td><td><code>feasible</code></td>
+            <td class="num">+8.0%</td><td class="num">+44.6%</td><td class="num">&minus;55.3%</td><td class="num">&minus;69.4%</td></tr>
+        <tr><td></td><td></td><td><code>packer</code></td>
+            <td class="num">+8.0%</td><td class="num">&minus;20.8%</td><td class="num">&minus;54.8%</td><td class="num">&minus;72.8%</td></tr>
+        <tr><td>Moderate (Apr)</td><td class="num">65.4%</td><td><code>feasible</code></td>
+            <td class="num">+3.0%</td><td class="num">+22.9%</td><td class="num">&minus;36.6%</td><td class="num">&minus;88.0%</td></tr>
+        <tr><td></td><td></td><td><code>packer</code></td>
+            <td class="num">+3.4%</td><td class="num">+12.6%</td><td class="num">&minus;37.0%</td><td class="num">&minus;88.5%</td></tr>
+        <tr><td>Quiet (Jul)</td><td class="num">36.2%</td><td><code>feasible</code></td>
+            <td class="num">+1.0%</td><td class="num">&minus;0.3%</td><td class="num">&minus;64.1%</td><td class="num">&minus;99.5%</td></tr>
+        <tr><td></td><td></td><td><code>packer</code></td>
+            <td class="num">+1.0%</td><td class="num">&minus;32.8%</td><td class="num">&minus;62.6%</td><td class="num">&minus;99.4%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <p>Adding elastic relief on top of the packer, against the same baseline:</p>
+  </div>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Window</th><th>Configuration</th><th class="num">CPU alloc-h</th>
+        <th class="num">Stranded</th><th class="num">Total wait</th>
+        <th class="num">High-ratio wait</th><th class="num">Promotions</th></tr></thead>
+      <tbody>
+        <tr><td>Busy</td><td><code>packer</code> + flex</td><td class="num">+13.1%</td>
+            <td class="num">&minus;4.6%</td><td class="num">&minus;80.0%</td><td class="num">&minus;44.4%</td><td class="num">1,186</td></tr>
+        <tr><td>Moderate</td><td><code>packer</code> + flex</td><td class="num">+6.4%</td>
+            <td class="num">&minus;6.6%</td><td class="num">&minus;76.8%</td><td class="num">&minus;94.6%</td><td class="num">3,643</td></tr>
+        <tr><td>Quiet</td><td><code>packer</code> + flex</td><td class="num">+0.5%</td>
+            <td class="num">&minus;38.8%</td><td class="num">&minus;95.1%</td><td class="num">&minus;100%</td><td class="num">4,604</td></tr>
+        <tr class="total"><td>Moderate</td><td>static rule + flex, <em>no</em> placement fix</td>
+            <td class="num">+2.6%</td><td class="num">&minus;0.1%</td><td class="num">+17.6%</td>
+            <td class="num">+67.4%</td><td class="num">948</td></tr>
+        <tr class="total"><td>Quiet</td><td>static rule + flex, <em>no</em> placement fix</td>
+            <td class="num">&minus;0.2%</td><td class="num">&minus;1.6%</td><td class="num">+18.0%</td>
+            <td class="num">+60.1%</td><td class="num">4,409</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <div class="note warn">
+      <p class="t">Ordering constraint: relief must come second</p>
+      <p>The last two rows are elastic relief applied to the cluster <em class="term">as it is
+      configured today</em>, without the placement fix. It <strong>makes things worse</strong>:
+      total wait up 17&ndash;18% and high-ratio jobs waiting 60&ndash;67% longer, in both the moderate
+      and quiet windows. Promoting jobs into a badly partitioned cluster only lets more of them pile
+      into the wrong partitions, and the jobs that lose are the ones already worst served.</p>
+      <p style="margin-top:10px">Elastic limits are therefore not an independent improvement that can
+      be enabled early because it looks cheap. They are safe only <em class="term">after</em> placement
+      is fixed &mdash; which is the same order the blast-radius argument gives, for a completely
+      different reason.</p>
+    </div>
+  </div>
+
+  <div class="col">
+    <p>Both policies cut waiting hard and both raise allocation, by more when the cluster is busy and
+    there is headroom to take. They separate on <strong>stranding</strong>, and that is the case for
+    &Phi;: the naive feasibility fix makes stranding <em class="term">worse</em> in two of three
+    windows &mdash; markedly so under load &mdash; because once every job may go anywhere, high-ratio
+    jobs consume slim nodes&rsquo; memory and leave their CPUs unusable. The option-value term is what
+    stops that, and it does most of its work exactly where the argument in &sect;03 said it would: on
+    the near-idle cluster, where &Phi; is large and worth protecting.</p>
+
+    <p>The packer is not uniformly better than the static rule on stranding &mdash; in the moderate
+    window it is 12.6% worse. That is the trade being made: the static rule is <em class="term">good</em>
+    at avoiding stranding, by confining high-ratio jobs to two partitions, and pays for it in queue
+    time and allocation. The packer gives some of that back for a 37% cut in waiting.</p>
+
+    <div class="note warn">
+      <p class="t">How far to trust these numbers</p>
+      <p>Simulated wait under the static rule against what the accounting database records:
+      <b>32,252 vs 28,585</b> job-hours in the busy window and <b>10,920 vs 8,744</b> in the moderate
+      one &mdash; close enough to be useful. In the quiet window it is <b>491 vs 5,032</b>, badly off,
+      because at 36% load the real queue is shaped by things this model omits: fair-share priority
+      decay, <code>bf_max_job_test</code>, node drains and reservations. <strong>Comparisons between
+      policies within one run are the usable output; absolute numbers are not calibrated.</strong></p>
+    </div>
+  </div>
+
+  <div class="col">
+    <h4>Mechanism testing</h4>
+    <p>A single-host test cluster with fake node definitions mirroring the real
+    <code>CPUs</code>/<code>RealMemory</code>, <code>SlurmdParameters=config_overrides</code>, and
+    <code>sleep</code> jobs. This proves plumbing only: the plugin sets the right string, the
+    daemon&rsquo;s updates land, the fallback fires, latency is acceptable.</p>
+
+    <h4>Shadow mode on production</h4>
+    <p>The daemon runs in <code>observe</code> mode: it computes every decision, writes a JSONL
+    record with the job, the chosen set, the alternatives, the score, and the cluster state that
+    produced it &mdash; and changes nothing. Two to four weeks of that is the face-validity check,
+    and it is also the answer to &ldquo;show me what it would have done&rdquo;.</p>
+
+    <h4>Then canary</h4>
+    <p>Enforcement first for the re-placement of pending jobs, which is reversible and already done by
+    hand today. Submit-time enforcement after that. Kill switch is a file:
+    <code>touch /etc/sqp/disable</code> and the next submission uses the static rule.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2><span class="n">09</span> Implementation</h2>
+    <h3>What exists, and what has actually been run</h3>
+    <p>The daemon is written and runs. <code>sqp/policy.py</code> is the single implementation of
+    the placement decision, imported by both the daemon and the replay harness, so the policy that
+    is evaluated offline and the one that runs in production cannot drift apart &mdash; which
+    matters more for a paper than for an operator.</p>
+  </div>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Component</th><th>State</th></tr></thead>
+      <tbody>
+        <tr><td><code>sqp/config.py</code></td><td>Every tunable in one TOML file; no magic numbers in code</td></tr>
+        <tr><td><code>sqp/policy.py</code></td><td>&Phi;, scoring, bucket table, Lua rendering &mdash; 12 behavioural tests pass</td></tr>
+        <tr><td><code>sqp/slurm.py</code></td><td>Runs against a live cluster; parses <code>--oneliner</code>, not <code>--json</code></td></tr>
+        <tr><td><code>sqp/limits.py</code></td><td>Global controller and per-job promoter, dynamics tested</td></tr>
+        <tr><td><code>sqp/daemon.py</code></td><td>Four threads, ran live at 1 Hz through jobs starting and finishing</td></tr>
+        <tr><td><code>lua/job_submit.lua</code></td><td>Tested end to end against a real slurmctld with this cluster's topology</td></tr>
+        <tr><td><code>tests/testcluster.sh</code></td><td>Stands up a throwaway controller as an unprivileged user, for that test</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="col">
+    <p>Two deliberate choices are worth recording. The Slurm interface parses
+    <code>scontrol ... --oneliner</code> key=value output rather than <code>--json</code>, because
+    the JSON schemas move between releases &mdash; this site runs 24.11 in production and 26.05 on
+    its test box &mdash; while the key=value form has been stable for years. And the policy table is
+    rewritten only when the <em class="term">decisions</em> change, not when the state does: an
+    early version compared the rendered text, which embeds a timestamp, and so rewrote the file
+    every second and would have forced the plugin to reparse on every submission.</p>
+
+    <h4>How the plugin is tested without a cluster</h4>
+    <p><code>tests/testcluster.sh</code> starts a throwaway <code>slurmctld</code> as an
+    unprivileged user on non-default ports, configured with the real node and partition
+    topology &mdash; all 17 nodes, their true CPU counts and memory, the real PriorityTiers. No
+    <code>slurmd</code> runs, so jobs stay <code>PENDING</code>; that is sufficient, because
+    <code>job_submit</code> executes at submission and the partition it assigned is visible on a
+    pending job. Node state is manipulated with <code>scontrol update ... state=drain</code> to make
+    the cluster change underneath the daemon.</p>
+
+    <p>What that established:</p>
+    <ul>
+      <li><strong>The static fallback reproduces the current rule exactly</strong>, including
+      routing a 1-CPU/32 GB job to the high-memory partitions &mdash; the behaviour this project
+      exists to fix.</li>
+      <li><strong>Decisions track cluster state.</strong> Draining zen5x and five of seven zen3
+      nodes changed a 16-CPU/64 GB job from <code>zen5,zen5x,zen3</code> to <code>zen5,zen3</code>
+      and a 1-CPU/32 GB job from <code>zen5x,zen3x</code> to <code>zen3x</code> &mdash; same shape
+      bucket, different answer.</li>
+      <li><strong>Every failure path falls back and no submission is ever rejected.</strong> Table
+      missing, table stale, table truncated mid-write, table replaced with non-Lua garbage, disable
+      file present: each produced the static rule and a logged reason, and each job was accepted.</li>
+      <li><strong>Write-on-change works.</strong> A 15-second run at 1 Hz produced three table
+      writes, all of them real changes, none spurious &mdash; against twenty writes in twenty
+      seconds before the timestamp bug was found.</li>
+    </ul>
+
+    <p>Three bugs surfaced only under that test, and none of them would have been found by
+    reasoning about the code.</p>
+
+    <p>The rendered table embedded a timestamp, so comparing rendered text rewrote the file every
+    tick. The partition list came out ordered by score, so floating-point ties reordered an
+    unchanged set and looked like a change; order is now canonical, which is free to choose because
+    Slurm evaluates a multi-partition job in PriorityTier order regardless of list order.</p>
+
+    <div class="note warn">
+      <p class="t">The third one was worse than the bug being fixed</p>
+      <p>A 24-CPU / 2,200 GB job was <strong>rejected outright</strong>. Its shape bucket is
+      open-ended &mdash; everything above 24,576 MB/CPU shares one bucket &mdash; so the table was
+      built from a representative of 864 GB and answered <code>zen3x</code>, whose largest node holds
+      2,041,663 MB. The job needed 2,252,800 MB. <strong>The static rule this replaces would have
+      accepted it</strong>, because it names both high-memory partitions unconditionally.</p>
+      <p style="margin-top:10px">Bucketing had quietly discarded the absolute-footprint information
+      that &sect;01 identifies as the whole point. The table now carries each partition's largest
+      node alongside it, and the plugin filters the looked-up set by the job's real size &mdash;
+      recomputing feasibility across all partitions when the set it was given cannot hold the job,
+      since pruning alone cannot recover from a representative that was too small. The correction is
+      logged as <code>refit</code> so it is visible in the decision log rather than silent.</p>
+    </div>
+
+    <p>That is the argument for the test rig existing at all. The failure was invisible in the
+    simulator, which works in exact job shapes rather than buckets, and invisible in the unit tests,
+    which exercised the policy rather than the table.</p>
+
+    <p>Three of the 64 shape buckets describe jobs no node in the cluster can hold &mdash; 192 CPUs
+    at 36 GB/CPU is 6.75 TB. Those resolve to the partition with the largest node rather than to an
+    empty set, so the user gets Slurm&rsquo;s ordinary &ldquo;requested node configuration is not
+    available&rdquo; instead of a job with no partition. The behavioural test suite exists largely
+    to catch that class of mistake.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2><span class="n">10</span> Portability</h2>
+    <h3>Nothing above is specific to biocloud</h3>
+    <p>Node and partition topology is discovered from <code>scontrol show nodes --json</code> and
+    <code>scontrol show partitions --json</code>; the demand distribution and the runtime predictor
+    are fitted from the site&rsquo;s own <code>sacct</code> history. A site supplies one YAML file
+    with policy weights and, optionally, a mapping of partitions into capability classes &mdash; which
+    can also be derived by clustering nodes on memory-per-CPU.</p>
+    <p>Dependencies are the Python 3 standard library and the Slurm client binaries. Install is a
+    package, one systemd unit, and adding <code>JobSubmitPlugins=lua</code> with the shipped
+    <code>job_submit.lua</code>. Where <code>--json</code> is unavailable the daemon falls back to
+    formatted <code>squeue</code>/<code>sinfo</code> output.</p>
+
+    <h4>Open questions</h4>
+    <ul>
+      <li>How far ahead is &Phi; worth evaluating? Too short and it ignores the 14-day jobs; too long
+      and it is dominated by prediction error.</li>
+      <li>Does cohort narrowing need a priority <code>nice</code> component, or is restricting the
+      partition set sufficient on its own?</li>
+      <li>How should &Phi; treat the interactive partition, which is reserved and must not be packed?</li>
+      <li>Whether the demand distribution should be seasonal (hour-of-week) or a flat trailing window.
+      The replay harness can answer this directly.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="col">
+    Draft 1 &middot; measurements from <code>biocloud_job_table</code> and <code>biocloud_step_table</code>,
+    2,387,825 jobs. Analysis code and the SQLite import live in the project&rsquo;s <code>tools/</code>
+    directory; every figure here is reproducible from them.
+  </div>
+</footer>
+
+</div>

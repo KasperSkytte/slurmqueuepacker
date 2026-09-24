@@ -1,0 +1,8 @@
+# Accounting data: large, and holds user and job records. Never commit.
+*.sqlite
+*.sqlite-journal
+*.sql
+*.bz2
+
+__pycache__/
+*.pyc

@@ -1,0 +1,25 @@
+[Unit]
+Description=slurmqueuepacker control loop
+After=network.target slurmctld.service
+Wants=slurmctld.service
+
+[Service]
+Type=simple
+User=slurm
+Group=slurm
+ExecStart=/usr/bin/python3 -m sqp.daemon -c /etc/sqp/sqp.toml
+Restart=always
+RestartSec=5
+# The policy table lives on tmpfs; the plugin reads it on every submission.
+RuntimeDirectory=sqp
+RuntimeDirectoryMode=0755
+StateDirectory=sqp
+LogsDirectory=sqp
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/sqp /var/log/sqp
+
+[Install]
+WantedBy=multi-user.target

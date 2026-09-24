@@ -1,0 +1,74 @@
+# slurmqueuepacker configuration.
+# Every tunable the daemon has. Values shown are the built-in defaults;
+# regenerate with:  python3 -m sqp.daemon --print-config
+#
+# Start in mode = "observe": the daemon computes and logs every decision and
+# changes nothing. Move to "advise" to write the policy table, then "enforce"
+# to let it act on limits. Creating the disable_file reverts to the site's
+# static rule instantly, on the next submission, with no restart.
+
+[general]
+mode = "observe"
+state_dir = "/run/sqp"
+log_file = "/var/log/sqp/decisions.jsonl"
+disable_file = "/etc/sqp/disable"
+
+[cadence]
+score_interval = 1.0
+node_poll_interval = 1.0
+queue_poll_interval = 8.0
+act_interval = 15.0
+max_actions_per_interval = 5
+policy_max_age = 300.0
+
+[topology]
+batch_partitions = []          # empty = discover every partition
+exclude_partitions = []        # never assign these, by name
+exclude_interactive = true     # drop any partition named "interactive"
+exclude_gpu_nodes = true       # ignore GPU nodes; drop partitions left empty
+
+[topology.speed]
+default_speed = 1.0
+
+[policy]
+demand = [[800, 0.1], [1280, 0.15], [4267, 0.25], [7680, 0.25], [14178, 0.15], [30720, 0.1]]
+demand_median = 4267
+tolerance = 0.25
+ratio_threshold = 6000
+
+[policy.buckets]
+mem_per_cpu = [1024, 2048, 4096, 6144, 8192, 12288, 24576]
+cpus = [1, 4, 8, 16, 32, 64, 128]
+walltime_h = [1, 6, 24, 72]
+
+[starvation]
+
+[starvation.budget_hours]
+fat = 1.0
+slim = 4.0
+fat_ratio_threshold = 6000
+
+[limits]
+mode = "global"
+base_cpu_per_user = 864
+base_cpu_per_account = 1760
+ceiling = 2.0
+raise_above = 0.25
+lower_below = 0.1
+hysteresis = 5
+step = 1.25
+qos_name = "normal"
+flex_qos_name = "flex"
+flex_reserve = 0.05
+flex_phi_tolerance = 1.0
+
+[cohorts]
+key = ["user", "name", "cpus", "mem"]
+min_members = 50
+max_queue_share = 0.5
+
+[runtime_model]
+quantile = 0.95
+min_members = 20
+refresh_hours = 6
+margin = 1.25
