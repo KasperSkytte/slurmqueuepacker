@@ -7,6 +7,9 @@ Wants=slurmctld.service
 Type=simple
 User=slurm
 Group=slurm
+# The checkout from README "Installing"; the sqp package is imported from here.
+WorkingDirectory=/opt/slurmqueuepacker
+Environment=PYTHONPATH=/opt/slurmqueuepacker
 ExecStart=/usr/bin/python3 -m sqp.daemon -c /etc/sqp/sqp.toml
 Restart=always
 RestartSec=5
