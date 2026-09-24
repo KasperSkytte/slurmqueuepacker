@@ -102,6 +102,11 @@ def _merge(base: dict, over: dict) -> dict:
     return out
 
 
+def defaults() -> dict:
+    """The built-in configuration, without looking at any file."""
+    return copy.deepcopy(DEFAULTS)
+
+
 def load(path: str | None = None) -> dict:
     path = path or os.environ.get("SQP_CONFIG", "/etc/sqp/sqp.toml")
     if not os.path.exists(path):

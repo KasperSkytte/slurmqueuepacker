@@ -6,8 +6,11 @@ docs/design.html is wrong, not just the code.
 Safe to run on a live cluster: nothing here may start a process. subprocess.run
 is replaced before sqp is imported, and any attempt fails the run.
 """
-import sys, os, time, subprocess
+import sys, os, time, subprocess, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# A plain traceback on failure. Distribution crash handlers (Ubuntu's apport)
+# start processes of their own, which the guard below would block.
+sys.excepthook = sys.__excepthook__
 
 class _NoProcesses(AssertionError):
     pass
@@ -17,7 +20,7 @@ subprocess.run = _no_processes
 
 from sqp import config, policy, daemon
 
-CFG = config.load('/nonexistent')
+CFG = config.defaults()
 DEMAND = [tuple(x) for x in CFG['policy']['demand']]
 SPEED = {'zen5': 1.0, 'zen5x': 1.0, 'zen3': 0.8, 'zen3x': 0.8}
 TOTAL = {
@@ -121,10 +124,10 @@ ran = []
 real_run = slurm._run
 slurm._run = lambda args, timeout=10.0: ran.append(args) or ""
 try:
-    cfg = config.load('/nonexistent')
+    cfg = config.defaults()
     cfg["general"]["mode"] = "observe"
     cfg["general"]["state_dir"] = tempfile.mkdtemp()
-    cfg["general"]["disable_file"] = "/nonexistent/disable"
+    cfg["general"]["disable_file"] = os.path.join(tempfile.mkdtemp(), "disable")
     d = daemon.Daemon(cfg)
     d.log_fh = io.StringIO()
     nodes = {f"{p}{i}": dict(cpus=c, mem=m, alloc_cpus=0, alloc_mem=0,
@@ -187,7 +190,7 @@ def node(parts, gpu=False):
 nodes = {"a": node(["zen3"]), "b": node(["Interactive"]), "g": node(["gpu"], True),
          "m1": node(["mixed"]), "m2": node(["mixed"], True)}
 parts = {p: dict(tier=1, state="UP") for p in ("zen3", "Interactive", "gpu", "mixed")}
-cfg = config.load('/nonexistent')
+cfg = config.defaults()
 d = daemon.Daemon(cfg)
 keep, dropped = d.partition_filter(parts, nodes)
 check("defaults keep only CPU batch partitions", sorted(keep) == ["mixed", "zen3"],
