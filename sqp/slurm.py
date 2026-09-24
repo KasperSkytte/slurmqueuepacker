@@ -14,7 +14,19 @@ class SlurmError(RuntimeError):
     pass
 
 
+# The only commands that may run while actuation is off. Every process sqp
+# starts goes through _run, so this is the last line of defence for a dry run
+# under an account that Slurm would otherwise let change anything.
+_READ_ONLY = {("scontrol", "show"), ("squeue",), ("sacctmgr", "-nP", "show")}
+
+
+def _read_only(args) -> bool:
+    return any(tuple(args[:len(p)]) == p for p in _READ_ONLY)
+
+
 def _run(args, timeout=10.0) -> str:
+    if not _actuate and not _read_only(args):
+        raise SlurmError(f"refused, actuation is off: {shlex.join(args)}")
     try:
         r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     except (subprocess.TimeoutExpired, OSError) as e:

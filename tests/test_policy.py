@@ -2,9 +2,19 @@
 
 These are the claims the design rests on. If one of them fails, the argument in
 docs/design.html is wrong, not just the code.
+
+Safe to run on a live cluster: nothing here may start a process. subprocess.run
+is replaced before sqp is imported, and any attempt fails the run.
 """
-import sys, os, time
+import sys, os, time, subprocess
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+class _NoProcesses(AssertionError):
+    pass
+def _no_processes(args, **kw):
+    raise _NoProcesses(f"tests must not start processes: {args}")
+subprocess.run = _no_processes
+
 from sqp import config, policy, daemon
 
 CFG = config.load('/nonexistent')
@@ -137,13 +147,35 @@ try:
           q.get("executed") is False and q.get("cmd", "").startswith("sacctmgr -i modify qos")
           and "raise_above" in q.get("why", ""), json.dumps(q)[:200])
     check("apply() refuses while actuation is off",
-          slurm.set_qos_cpu_limits("normal", 1, 1) is False and ran == [])
+          slurm.set_qos_cpu_limits("sqp-test-no-such-qos", 1, 1) is False and ran == [])
     slurm.set_actuation(True)
     check("apply() runs once actuation is on",
-          slurm.set_qos_cpu_limits("normal", 1, 1) is True and len(ran) == 1)
+          slurm.set_qos_cpu_limits("sqp-test-no-such-qos", 1, 1) is True and len(ran) == 1)
 finally:
     slurm._run = real_run
     slurm.set_actuation(False)
+
+print("\n10b. the process launcher itself refuses writes while actuation is off")
+import subprocess
+launched = []
+blocker = subprocess.run
+subprocess.run = lambda args, **kw: launched.append(args) or subprocess.CompletedProcess(args, 0, "", "")
+try:
+    slurm.set_actuation(False)
+    refused = 0
+    for argv in (slurm.cmd_set_qos_cpu_limits("sqp-test-no-such-qos", 1, 1),
+                 slurm.cmd_set_job_partitions("1", ["zen3"]),
+                 slurm.cmd_set_job_qos("1", "flex"), slurm.cmd_set_array_throttle("1", 5)):
+        try:
+            slurm._run(argv)
+        except slurm.SlurmError:
+            refused += 1
+    check("every state-changing command is refused before a process starts",
+          refused == 4 and launched == [], f"refused={refused} launched={launched}")
+    slurm._run(["scontrol", "show", "nodes", "--oneliner"])
+    check("read-only commands still run", len(launched) == 1)
+finally:
+    subprocess.run = blocker
 
 print("\n11. partitions are discovered; interactive and GPU nodes excluded by default")
 check("GPU found in Gres", slurm._has_gpu("gpu:a10:1(S:0)", "cpu=64"))
@@ -167,6 +199,8 @@ cfg["topology"].update(exclude_interactive=False, exclude_gpu_nodes=False,
 keep, dropped = d.partition_filter(parts, nodes)
 check("each exclusion can be turned off; names can be excluded",
       sorted(keep) == ["Interactive", "gpu", "mixed"] and "zen3" in dropped, f"{keep}")
+
+check("no test started a process", subprocess.run is _no_processes)
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
 sys.exit(1 if fails else 0)
