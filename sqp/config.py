@@ -63,7 +63,8 @@ DEFAULTS: dict = {
         #            is persistently idle; snap back instantly when it is not.
         #            Fair by construction; fair-share still orders who fills it.
         #   perjob - move individual pending jobs to a flex QOS. Surgical, but
-        #            biased toward jobs that are easy to place.
+        #            biased toward jobs that are easy to place. NOT YET
+        #            IMPLEMENTED: currently changes nothing.
         "mode": "global",
         "base_cpu_per_user": 864,
         "base_cpu_per_account": 1760,

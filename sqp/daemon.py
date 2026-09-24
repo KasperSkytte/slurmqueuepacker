@@ -320,6 +320,10 @@ class Daemon:
                 info["warnings"].append("no partitions left to assign")
         except slurm.SlurmError as e:
             info["warnings"].append(f"partitions: {e}")
+        if self.cfg["limits"]["mode"] == "perjob":
+            info["warnings"].append(
+                "limits.mode = perjob is not implemented yet: no limits or QOS will be "
+                "changed. Use global or off.")
         if self.cfg["limits"]["mode"] == "global":
             lc, qos = self.cfg["limits"], self.cfg["limits"]["qos_name"]
             try:
