@@ -157,11 +157,13 @@ Run the `python3 -m sqp...` commands from this directory.
 ### 2. Dry run
 
 ```sh
-python3 -m sqp.daemon --dry-run --state-dir ~/sqp-dry \
-    --log-file ~/sqp-dry/decisions.jsonl --text-log ~/sqp-dry/sqp.log
+python3 -m sqp.daemon --dry-run --state-dir ~/sqp-dry
 ```
 
-It runs in the foreground until Ctrl-C. Follow it from another terminal with
+Everything it writes goes in `~/sqp-dry`: the text log `sqp.log`, the same as JSON in
+`decisions.jsonl`, and the table it would have written. (`--log-file` and `--text-log`
+override single paths; one given without the other puts both side by side.) It runs in
+the foreground until Ctrl-C. Follow it from another terminal with
 `tail -f ~/sqp-dry/sqp.log`, which has one entry per job as it is submitted: where Slurm
 put it, where sqp would have, and why. `python3 -m sqp.report ~/sqp-dry/decisions.jsonl --summary`
 totals it up.

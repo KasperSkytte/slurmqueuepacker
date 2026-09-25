@@ -98,7 +98,9 @@ class Daemon:
                 os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
                 setattr(self, attr, open(path, "a"))
             except OSError as e:
-                print(f"sqpd: cannot open {path}: {e}", file=sys.stderr)
+                print(f"sqpd: cannot open {path}: {e}. As an ordinary user, give "
+                      "--state-dir (or --log-file/--text-log) a directory you can write.",
+                      file=sys.stderr)
 
     def blocked(self, modes) -> str | None:
         """Why an action may not be carried out now, or None if it may."""
@@ -657,6 +659,25 @@ class Daemon:
             self.log("stop")
 
 
+def cli_paths(g, state_dir, log_file, text_log):
+    """Apply output paths from the command line. A path not given follows the ones
+    that are, so pointing one output at a directory you can write never leaves
+    another at a system default you cannot: --state-dir alone puts the logs there
+    too, and --log-file alone puts the text log beside it (and vice versa)."""
+    if state_dir:
+        g["state_dir"] = state_dir
+    base = (os.path.dirname(log_file or "") or os.path.dirname(text_log or "")
+            or state_dir)
+    if log_file:
+        g["log_file"] = log_file
+    elif base:
+        g["log_file"] = os.path.join(base, "decisions.jsonl")
+    if text_log is not None:
+        g["text_log"] = text_log
+    elif base:
+        g["text_log"] = os.path.join(base, "sqp.log")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="sqpd")
     ap.add_argument("-c", "--config")
@@ -664,9 +685,11 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true",
                     help="force mode=observe: log every action it would take, "
                          "with the command and the reason, and change nothing")
-    ap.add_argument("--log-file", help="override [general] log_file")
-    ap.add_argument("--text-log", help="override [general] text_log")
-    ap.add_argument("--state-dir", help="override [general] state_dir")
+    ap.add_argument("--state-dir", help="override [general] state_dir; also where the "
+                    "logs go unless --log-file/--text-log say otherwise")
+    ap.add_argument("--log-file", help="override [general] log_file; the text log goes "
+                    "next to it unless --text-log says otherwise")
+    ap.add_argument("--text-log", help="override [general] text_log ('' = none)")
     ap.add_argument("--once", action="store_true",
                     help="one scoring pass to stdout, then exit (for testing)")
     ap.add_argument("--print-config", action="store_true")
@@ -677,12 +700,7 @@ def main(argv=None):
         ap.error("--dry-run means --mode observe")
     if a.mode or a.dry_run:
         cfg["general"]["mode"] = a.mode or "observe"
-    if a.log_file:
-        cfg["general"]["log_file"] = a.log_file
-    if a.text_log is not None:
-        cfg["general"]["text_log"] = a.text_log
-    if a.state_dir:
-        cfg["general"]["state_dir"] = a.state_dir
+    cli_paths(cfg["general"], a.state_dir, a.log_file, a.text_log)
     if a.print_config:
         print(config.dump_defaults()); return 0
 

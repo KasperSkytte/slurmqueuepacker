@@ -328,6 +328,21 @@ check("power saving is not down", slurm._up("IDLE+CLOUD+POWERED_DOWN") and slurm
 check("down, drained and failing are down",
       not any(slurm._up(x) for x in ("DOWN*", "MIXED+DRAIN", "IDLE+DRAIN", "FAILING", "INVAL")))
 
+print("\n15. output paths follow the ones given on the command line")
+def paths(state=None, log=None, text=None):
+    g = dict(config.defaults()["general"])
+    daemon.cli_paths(g, state, log, text)
+    return g["state_dir"], g["log_file"], g["text_log"]
+check("--state-dir alone puts everything there",
+      paths(state="/h/u/dry") == ("/h/u/dry", "/h/u/dry/decisions.jsonl", "/h/u/dry/sqp.log"))
+check("--log-file alone puts the text log beside it",
+      paths(state="/h/u/s", log="/h/u/l/d.jsonl")[1:] == ("/h/u/l/d.jsonl", "/h/u/l/sqp.log"))
+check("--text-log alone puts the JSON log beside it",
+      paths(text="/h/u/t/x.log")[1:] == ("/h/u/t/decisions.jsonl", "/h/u/t/x.log"))
+check("--text-log '' still turns the text log off", paths(state="/h/u/s", text="")[2] == "")
+check("nothing given keeps the config's paths",
+      paths() == ("/run/sqp", "/var/log/sqp/decisions.jsonl", "/var/log/sqp/sqp.log"))
+
 check("no test started a process", subprocess.run is _no_processes)
 
 print(f"\n{'ALL PASS' if not fails else 'FAILURES: ' + ', '.join(fails)}")
