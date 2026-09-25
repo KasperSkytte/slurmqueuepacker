@@ -665,6 +665,14 @@ end</code></pre>
     direction, because jobs are not preemptible and a cap that is briefly too high can commit nodes
     for days.</p>
 
+    <p><strong>Update (sqpd v1.1): a pulse, not a level.</strong> Staying raised for as long as the
+    cluster is idle still lets one user who submits a large pool mid-window take up to twice the
+    cap for days. sqpd now raises the caps only when pending jobs are held by the CPU cap
+    (<code>QOSMaxCpuPerUserLimit</code>, <code>MaxCpuPerAccount</code>) and would fit in idle
+    hardware, for 60&nbsp;s, then returns to base and waits at least 5&nbsp;minutes before the next
+    pulse. The replay in <code>tools/simulate.py</code> still models the stepwise controller
+    described above.</p>
+
     <p><strong>Per-job.</strong> <code>scontrol update jobid=&lt;id&gt; qos=flex</code> on one
     pending job at a time, into a QOS differing from <code>normal</code> only in its cap
     (<code>Priority=0</code>, <code>UsageFactor=1.0</code>, so relief never reorders the queue or

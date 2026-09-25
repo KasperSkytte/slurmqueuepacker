@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="552" viewBox="0 0 940 552" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img">
+<title>Node allocation on 20 July 2026, 13:12</title><desc>Paired bars per node showing the share of CPUs and memory allocated on 20 July 2026, 13:12. Slim nodes had most memory free; fat nodes had memory nearly full with CPUs idle. 98 high-memory jobs waited for fat nodes.</desc>
+<rect width="100%" height="100%" rx="8" fill="#fcfcfb"/>
+<line x1="716.0" y1="150" x2="716.0" y2="304" stroke="#e1e0d9" stroke-width="1"/>
+<line x1="641.0" y1="150" x2="641.0" y2="304" stroke="#e1e0d9" stroke-width="1"/>
+<line x1="566.0" y1="150" x2="566.0" y2="304" stroke="#c3c2b7" stroke-width="1"/>
+<line x1="258.0" y1="150" x2="258.0" y2="514" stroke="#e1e0d9" stroke-width="1"/>
+<line x1="183.0" y1="150" x2="183.0" y2="514" stroke="#e1e0d9" stroke-width="1"/>
+<line x1="108.0" y1="150" x2="108.0" y2="514" stroke="#c3c2b7" stroke-width="1"/>
+<text x="24.0" y="40.0" fill="#0b0b0b" font-size="16" font-weight="600" text-anchor="start">Biocloud, 20 July 2026, 13:12: memory ran out on the fat nodes, CPUs on the slim ones</text>
+<text x="24.0" y="62.0" fill="#52514e" font-size="13" font-weight="400" text-anchor="start">98 high-memory jobs were waiting for a fat node; some went on to wait 190 hours. The slim nodes had room for 12 of them.</text>
+<rect x="24" y="77" width="12" height="9" rx="2" fill="#2a78d6"/>
+<text x="42.0" y="86.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">CPUs allocated</text>
+<rect x="152" y="77" width="12" height="9" rx="2" fill="#eb6834"/>
+<text x="170.0" y="86.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">memory allocated</text>
+<text x="296.0" y="86.0" fill="#0b0b0b" font-size="12" font-weight="600" text-anchor="start">bold: free space a waiting job fits in</text>
+<text x="24.0" y="118.0" fill="#0b0b0b" font-size="13" font-weight="600" text-anchor="start">Slim nodes</text>
+<text x="24.0" y="135.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">CPUs fill first; memory is left over</text>
+<text x="24.0" y="162.0" fill="#898781" font-size="11" font-weight="600" text-anchor="start">zen5</text>
+<text x="24.0" y="184.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node12</text>
+<path d="M108.0,170.0 h100.7 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-100.7 z" fill="#2a78d6"/>
+<path d="M108.0,181.0 h55.6 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-55.6 z" fill="#eb6834"/>
+<text x="268.0" y="184.0" fill="#0b0b0b" font-size="11" font-weight="600" text-anchor="start">87 CPUs, 905 GB free</text>
+<text x="24.0" y="214.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node13</text>
+<text x="108.0" y="214.0" fill="#898781" font-size="11" font-weight="400" text-anchor="start">out of service</text>
+<text x="24.0" y="244.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node16</text>
+<path d="M108.0,230.0 h128.4 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-128.4 z" fill="#2a78d6"/>
+<path d="M108.0,241.0 h22.8 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-22.8 z" fill="#eb6834"/>
+<text x="268.0" y="244.0" fill="#0b0b0b" font-size="11" font-weight="600" text-anchor="start">30 CPUs, 1,233 GB free</text>
+<text x="24.0" y="274.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node17</text>
+<path d="M108.0,260.0 h92.7 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-92.7 z" fill="#2a78d6"/>
+<path d="M108.0,271.0 h36.9 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-36.9 z" fill="#eb6834"/>
+<text x="268.0" y="274.0" fill="#0b0b0b" font-size="11" font-weight="600" text-anchor="start">91 CPUs, 1,092 GB free</text>
+<text x="24.0" y="302.0" fill="#898781" font-size="11" font-weight="600" text-anchor="start">zen3</text>
+<text x="24.0" y="324.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node01</text>
+<path d="M108.0,310.0 h76.3 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-76.3 z" fill="#2a78d6"/>
+<path d="M108.0,321.0 h38.9 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-38.9 z" fill="#eb6834"/>
+<text x="268.0" y="324.0" fill="#0b0b0b" font-size="11" font-weight="600" text-anchor="start">119 CPUs, 712 GB free</text>
+<text x="24.0" y="354.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node02</text>
+<path d="M108.0,340.0 h146.0 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-146.0 z" fill="#2a78d6"/>
+<path d="M108.0,351.0 h41.6 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-41.6 z" fill="#eb6834"/>
+<text x="268.0" y="354.0" fill="#898781" font-size="11" font-weight="400" text-anchor="start">0 CPUs, 344 GB free</text>
+<text x="24.0" y="384.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node03</text>
+<path d="M108.0,370.0 h97.6 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-97.6 z" fill="#2a78d6"/>
+<path d="M108.0,381.0 h11.1 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-11.1 z" fill="#eb6834"/>
+<text x="268.0" y="384.0" fill="#0b0b0b" font-size="11" font-weight="600" text-anchor="start">62 CPUs, 897 GB free</text>
+<text x="24.0" y="414.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node04</text>
+<path d="M108.0,400.0 h77.2 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-77.2 z" fill="#2a78d6"/>
+<path d="M108.0,411.0 h33.7 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-33.7 z" fill="#eb6834"/>
+<text x="268.0" y="414.0" fill="#0b0b0b" font-size="11" font-weight="600" text-anchor="start">88 CPUs, 747 GB free</text>
+<text x="24.0" y="444.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node05</text>
+<path d="M108.0,430.0 h74.1 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-74.1 z" fill="#2a78d6"/>
+<path d="M108.0,441.0 h78.7 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-78.7 z" fill="#eb6834"/>
+<text x="268.0" y="444.0" fill="#0b0b0b" font-size="11" font-weight="600" text-anchor="start">92 CPUs, 448 GB free</text>
+<text x="24.0" y="474.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node06</text>
+<text x="108.0" y="474.0" fill="#898781" font-size="11" font-weight="400" text-anchor="start">out of service</text>
+<text x="24.0" y="504.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node07</text>
+<path d="M108.0,490.0 h118.7 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-118.7 z" fill="#2a78d6"/>
+<path d="M108.0,501.0 h56.6 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-56.6 z" fill="#eb6834"/>
+<text x="268.0" y="504.0" fill="#0b0b0b" font-size="11" font-weight="600" text-anchor="start">35 CPUs, 595 GB free</text>
+<text x="108.0" y="528.0" fill="#898781" font-size="11" font-weight="400" text-anchor="middle">0%</text>
+<text x="183.0" y="528.0" fill="#898781" font-size="11" font-weight="400" text-anchor="middle">50%</text>
+<text x="258.0" y="528.0" fill="#898781" font-size="11" font-weight="400" text-anchor="middle">100%</text>
+<text x="482.0" y="118.0" fill="#0b0b0b" font-size="13" font-weight="600" text-anchor="start">Fat nodes</text>
+<text x="482.0" y="135.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">memory fills first; CPUs are left over</text>
+<text x="482.0" y="162.0" fill="#898781" font-size="11" font-weight="600" text-anchor="start">zen5x</text>
+<text x="482.0" y="184.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node14</text>
+<path d="M566.0,170.0 h70.0 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-70.0 z" fill="#2a78d6"/>
+<path d="M566.0,181.0 h133.6 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-133.6 z" fill="#eb6834"/>
+<text x="726.0" y="184.0" fill="#898781" font-size="11" font-weight="400" text-anchor="start">146 CPUs, 186 GB free</text>
+<text x="482.0" y="214.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node15</text>
+<path d="M566.0,200.0 h84.5 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-84.5 z" fill="#2a78d6"/>
+<path d="M566.0,211.0 h144.2 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-144.2 z" fill="#eb6834"/>
+<text x="726.0" y="214.0" fill="#898781" font-size="11" font-weight="400" text-anchor="start">118 CPUs, 27 GB free</text>
+<text x="482.0" y="242.0" fill="#898781" font-size="11" font-weight="600" text-anchor="start">zen3x</text>
+<text x="482.0" y="264.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node08</text>
+<path d="M566.0,250.0 h81.9 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-81.9 z" fill="#2a78d6"/>
+<path d="M566.0,261.0 h132.5 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-132.5 z" fill="#eb6834"/>
+<text x="726.0" y="264.0" fill="#898781" font-size="11" font-weight="400" text-anchor="start">82 CPUs, 179 GB free</text>
+<text x="482.0" y="294.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">bio-node09</text>
+<path d="M566.0,280.0 h126.7 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-126.7 z" fill="#2a78d6"/>
+<path d="M566.0,291.0 h136.7 a4,4 0 0 1 4,4 v1.0 a4,4 0 0 1 -4,4 h-136.7 z" fill="#eb6834"/>
+<text x="726.0" y="294.0" fill="#898781" font-size="11" font-weight="400" text-anchor="start">33 CPUs, 124 GB free</text>
+<text x="566.0" y="318.0" fill="#898781" font-size="11" font-weight="400" text-anchor="middle">0%</text>
+<text x="641.0" y="318.0" fill="#898781" font-size="11" font-weight="400" text-anchor="middle">50%</text>
+<text x="716.0" y="318.0" fill="#898781" font-size="11" font-weight="400" text-anchor="middle">100%</text>
+<text x="482.0" y="352.0" fill="#0b0b0b" font-size="13" font-weight="600" text-anchor="start">Waiting for a fat node at that moment</text>
+<text x="482.0" y="372.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">91 ×  30 CPUs, 240 GB</text>
+<text x="482.0" y="389.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">2 ×  24 CPUs, 1,500 GB</text>
+<text x="482.0" y="406.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">1 ×  65 CPUs, 500 GB</text>
+<text x="482.0" y="423.0" fill="#52514e" font-size="12" font-weight="400" text-anchor="start">1 ×  100 CPUs, 1,750 GB</text>
+<text x="482.0" y="440.0" fill="#898781" font-size="12" font-weight="400" text-anchor="start">3 more of other shapes</text>
+</svg>
