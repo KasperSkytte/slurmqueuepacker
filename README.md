@@ -146,7 +146,7 @@ the next start.
 
 <!-- x-release-please-start-version -->
 ```sh
-sudo git clone --branch v1.0.0 https://github.com/kasperskytte/slurmqueuepacker /opt/slurmqueuepacker
+sudo git clone --branch v1.1.0 https://github.com/kasperskytte/slurmqueuepacker /opt/slurmqueuepacker
 cd /opt/slurmqueuepacker
 python3 tests/test_policy.py                  # ends in ALL PASS
 ```
