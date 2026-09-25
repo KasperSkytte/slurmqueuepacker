@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Stand up a throwaway slurmctld with a real cluster's node/partition topology,
-# as an unprivileged user, on non-default ports. No slurmd, so jobs stay PENDING
-# -- which is all that is needed, because job_submit runs at submission time and
-# the assigned partition is observable on a pending job.
+# as an unprivileged user, on non-default ports. There is no slurmd: the nodes
+# are declared as cloud nodes whose resume program does nothing, so a job that
+# fits is really allocated to a node (state CONFIGURING, it never runs) and one
+# that does not stays PENDING. That is enough to see the partitions and node
+# job_submit chose, and to fill nodes up. scancel frees them again.
 #
 # This is how the plugin is tested end to end without touching a real cluster.
 #
@@ -40,20 +42,26 @@ MaxJobCount=10000
 DefMemPerNode=512
 EnforcePartLimits=ALL
 JobSubmitPlugins=lua
+# Cloud nodes, "resumed" by /bin/true and never suspended: allocation without slurmd.
+SuspendProgram=/bin/true
+ResumeProgram=/bin/true
+ResumeTimeout=36000
+SuspendTime=-1
+SchedulerParameters=sched_min_interval=0
 GresTypes=gpu
 
 # Real biocloud topology. NodeAddr points at localhost because these nodes do
 # not exist; without it slurmctld fails to resolve them at startup.
-NodeName=bio-node01 NodeAddr=127.0.0.1 CPUs=256 RealMemory=1021540 State=UNKNOWN
-NodeName=bio-node02 NodeAddr=127.0.0.1 CPUs=192 RealMemory=505529  State=UNKNOWN
-NodeName=bio-node[03-07] NodeAddr=127.0.0.1 CPUs=192 RealMemory=1021567 State=UNKNOWN
-NodeName=bio-node08 NodeAddr=127.0.0.1 CPUs=192 RealMemory=2041663 State=UNKNOWN
-NodeName=bio-node09 NodeAddr=127.0.0.1 CPUs=256 RealMemory=2041636 State=UNKNOWN
-NodeName=bio-node10 NodeAddr=127.0.0.1 CPUs=64  RealMemory=247474  Gres=gpu:a10:1 State=UNKNOWN
-NodeName=bio-node11 NodeAddr=127.0.0.1 CPUs=288 RealMemory=1537338 State=UNKNOWN
-NodeName=bio-node[12-13] NodeAddr=127.0.0.1 CPUs=288 RealMemory=1537338 State=UNKNOWN
-NodeName=bio-node[14-15] NodeAddr=127.0.0.1 CPUs=288 RealMemory=2311479 State=UNKNOWN
-NodeName=bio-node[16-17] NodeAddr=127.0.0.1 CPUs=256 RealMemory=1537407 State=UNKNOWN
+NodeName=bio-node01 NodeAddr=127.0.0.1 CPUs=256 RealMemory=1021540 State=CLOUD
+NodeName=bio-node02 NodeAddr=127.0.0.1 CPUs=192 RealMemory=505529  State=CLOUD
+NodeName=bio-node[03-07] NodeAddr=127.0.0.1 CPUs=192 RealMemory=1021567 State=CLOUD
+NodeName=bio-node08 NodeAddr=127.0.0.1 CPUs=192 RealMemory=2041663 State=CLOUD
+NodeName=bio-node09 NodeAddr=127.0.0.1 CPUs=256 RealMemory=2041636 State=CLOUD
+NodeName=bio-node10 NodeAddr=127.0.0.1 CPUs=64  RealMemory=247474  Gres=gpu:a10:1 State=CLOUD
+NodeName=bio-node11 NodeAddr=127.0.0.1 CPUs=288 RealMemory=1537338 State=CLOUD
+NodeName=bio-node[12-13] NodeAddr=127.0.0.1 CPUs=288 RealMemory=1537338 State=CLOUD
+NodeName=bio-node[14-15] NodeAddr=127.0.0.1 CPUs=288 RealMemory=2311479 State=CLOUD
+NodeName=bio-node[16-17] NodeAddr=127.0.0.1 CPUs=256 RealMemory=1537407 State=CLOUD
 
 PartitionName=DEFAULT MaxTime=14-00:00:00 DefaultTime=0-01:00:00 State=UP OverSubscribe=NO
 PartitionName=interactive Nodes=bio-node11 PriorityTier=1 MaxTime=1-00:00:00

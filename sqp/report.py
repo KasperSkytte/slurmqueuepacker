@@ -4,12 +4,15 @@
     python3 -m sqp.report decisions.jsonl --summary               # summary only
     python3 -m sqp.report decisions.jsonl --only different,excluded
 
-The timeline has one entry per thing sqpd did or would have done: each change
-with its command, whether it ran, and why; and each job it saw submitted, with
-where Slurm put it, where the packer would have, and why.
+The timeline is the same text sqpd writes to its text log: each job it saw
+submitted, with the partitions Slurm gave it, the ones sqp would have, and
+whether and where sqp would pin its node; and each change sqp made or would
+have made, with its command and the reason.
 """
 from __future__ import annotations
 import argparse, collections, json, sys
+
+from . import narrate
 
 
 def entries(path):
@@ -19,28 +22,6 @@ def entries(path):
                 yield json.loads(line)
             except json.JSONDecodeError:
                 print(f"{path}:{n}: unparsable line skipped", file=sys.stderr)
-
-
-def show(r) -> str | None:
-    ev, t = r.get("event"), r.get("time", r.get("ts"))
-    if ev == "action":
-        state = "RAN" if r.get("executed") else f"WOULD ({r.get('blocked', 'failed')})"
-        out = [f"{t}  {state}  {r['action']}", f"    cmd: {r.get('cmd')}",
-               f"    why: {r.get('why')}"]
-        if r.get("error"):
-            out.append(f"    error: {r['error']}")
-        for c in r.get("changes") or []:
-            out.append(f"      {c['shape']:>22}  {c['before'] or '-'} -> {c['after']}")
-        return "\n".join(out)
-    if ev == "placement":
-        return (f"{t}  PLACE  job {r['jobid']} ({r['user']}, {r['name']}, {r['state']}) "
-                f"[{r['verdict']}]\n    slurm: {r['actual']}   sqp: {r['would']}\n"
-                f"    why: {r['why']}\n    cost: {r.get('cost')}")
-    if ev in ("preflight", "error", "start", "stop"):
-        extra = {k: v for k, v in r.items()
-                 if k not in ("ts", "time", "event", "cadence")}
-        return f"{t}  {ev.upper()}  {json.dumps(extra)}"
-    return None
 
 
 def main(argv=None):
@@ -54,6 +35,7 @@ def main(argv=None):
     actions = collections.Counter()
     verdicts = collections.Counter()
     moves = collections.Counter()
+    pins = collections.Counter()
     first = last = None
     for r in entries(a.log):
         first = first or r.get("time")
@@ -64,11 +46,12 @@ def main(argv=None):
             verdicts[r["verdict"]] += 1
             if r["verdict"] in ("different", "excluded"):
                 moves[f"{r['actual']} -> {r['would']}"] += 1
+            pins["pinned" if r.get("pin") else "left to Slurm"] += 1
             if only is not None and r["verdict"] not in only:
                 continue
         elif only is not None:
             continue
-        if not a.summary and (txt := show(r)):
+        if not a.summary and (txt := narrate.render(r)):
             print(txt)
 
     print(f"\n== summary {first} .. {last}")
@@ -79,6 +62,8 @@ def main(argv=None):
         print(f"  jobs seen: {total}")
         for v, n in verdicts.most_common():
             print(f"    {v:<10} {n:>7}  {100 * n / total:5.1f}%")
+        for how, n in pins.most_common():
+            print(f"  node {how:<14} {n:>7}  {100 * n / total:5.1f}%")
         if moves:
             print("  most common disagreements (slurm -> sqp):")
             for m, n in moves.most_common(10):

@@ -9,11 +9,12 @@ import copy, os, tomllib
 DEFAULTS: dict = {
     "general": {
         # observe  - compute and log decisions, change nothing
-        # advise   - also write the policy table (the plugin may still ignore it)
-        # enforce  - also act on pending jobs and limits
+        # advise   - also write the policy table (partitions only, no node pins)
+        # enforce  - also pin nodes, release stale pins, and change QOS limits
         "mode": "observe",
         "state_dir": "/run/sqp",
-        "log_file": "/var/log/sqp/decisions.jsonl",
+        "log_file": "/var/log/sqp/decisions.jsonl",   # every record, JSON lines
+        "text_log": "/var/log/sqp/sqp.log",          # the same, for people ("" = off)
         "disable_file": "/etc/sqp/disable",   # touch to fall back instantly
     },
     "cadence": {
@@ -51,6 +52,23 @@ DEFAULTS: dict = {
             "walltime_h": [1, 6, 24, 72],
         },
     },
+    "pin": {
+        # When a job can start the moment it is submitted, also choose its node
+        # (--nodelist). Slurm still decides the partition by PriorityTier: the
+        # node is chosen inside the highest-ranked partition that has room,
+        # as the one that leaves the most room usable by other jobs. Enforce
+        # mode only, because a pin that does not start must be released.
+        "enabled": True,
+        "min_gain": 1.0,          # nodes within this many placeable CPUs of the best
+                                  # count as equally good by capacity...
+        "min_ratio_gain": 0.1,    # ...and among those the one whose free memory per
+                                  # CPU is closest to the job's wins. Pin only if the
+                                  # winner beats the worst candidate by min_gain, or
+                                  # by this much in |log ratio| (0.1 ~ 10%)
+        "release_after": 60.0,    # seconds a pinned job may stay pending before sqpd
+                                  # drops the pin and restores its partitions
+        "max_age": 10.0,          # plugin pins only from node state this fresh
+    },
     "starvation": {
         # Wait budget per class, hours. Beyond this a job's feasible set is
         # widened and competing cohorts are narrowed until it starts.
@@ -59,21 +77,22 @@ DEFAULTS: dict = {
     },
     "limits": {
         # off | global | perjob
-        #   global - raise MaxTRESPU for EVERYONE, uniformly, while the cluster
-        #            is persistently idle; snap back instantly when it is not.
-        #            Fair by construction; fair-share still orders who fills it.
-        #   perjob - move individual pending jobs to a flex QOS. Surgical, but
-        #            biased toward jobs that are easy to place. NOT YET
+        #   global - when jobs are held only by the per-user or per-account CPU
+        #            cap and would fit in idle hardware, raise both caps for
+        #            EVERYONE for pulse_seconds, then put them back to base. The
+        #            caps are at base the rest of the time, and after a restart.
+        #   perjob - move individual pending jobs to a flex QOS. NOT YET
         #            IMPLEMENTED: currently changes nothing.
         "mode": "global",
+        "qos_name": "normal",         # the QOS whose MaxTRESPU/MaxTRESPA are pulsed
         "base_cpu_per_user": 864,
         "base_cpu_per_account": 1760,
-        "ceiling": 2.0,               # hard stop, multiple of base
-        "raise_above": 0.25,          # idle placeable fraction to step up
-        "lower_below": 0.10,          # below this, snap straight back
-        "hysteresis": 5,              # consecutive intervals before a step up
-        "step": 1.25,
-        "qos_name": "normal",         # global mode edits this QOS
+        "ceiling": 2.0,               # the raised caps, as a multiple of base
+        "raise_above": 0.25,          # idle placeable fraction needed to pulse
+        "lower_below": 0.10,          # end a pulse early if idle falls below this
+        "hysteresis": 5,              # consecutive checks meeting both conditions
+        "pulse_seconds": 60.0,        # how long the caps stay raised
+        "cooldown_seconds": 300.0,    # minimum time at base between pulses
         "flex_qos_name": "flex",      # perjob mode promotes into this QOS
         "flex_reserve": 0.05,
         "flex_phi_tolerance": 1.0,

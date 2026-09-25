@@ -134,9 +134,11 @@ try:
                              partitions=[p], up=True)
              for p, v in TOTAL.items() for i, (c, m) in enumerate(v)}
     d.sh.nodes, d.sh.parts = nodes, {p: dict(tier=1, state="UP") for p in TOTAL}
+    d.sh.pending = [dict(jobid="1", user="u", cpus=4, mem=8192, req_mem=8192, qos="normal",
+                         reason="QOSMaxCpuPerUserLimit", partition="zen5", state="PD")]
     d.score_once(d.sh.nodes, d.sh.parts, time.time())
     for _ in range(cfg["limits"]["hysteresis"]):
-        d.act_once()                                   # idle cluster: step the cap up
+        d.act_once()                     # idle cluster, a capped job that fits: pulse
     recs = [json.loads(l) for l in d.log_fh.getvalue().splitlines()]
     acts = {r["action"]: r for r in recs if r["event"] == "action"}
     check("actuation is off outside enforce", not slurm.actuation())
@@ -148,7 +150,7 @@ try:
     q = acts.get("set_qos_cpu_limits", {})
     check("the limit change is logged with its command and reason, not run",
           q.get("executed") is False and q.get("cmd", "").startswith("sacctmgr -i modify qos")
-          and "raise_above" in q.get("why", ""), json.dumps(q)[:200])
+          and "held only by the CPU cap" in q.get("why", ""), json.dumps(q)[:200])
     check("apply() refuses while actuation is off",
           slurm.set_qos_cpu_limits("sqp-test-no-such-qos", 1, 1) is False and ran == [])
     slurm.set_actuation(True)
@@ -157,6 +159,29 @@ try:
 finally:
     slurm._run = real_run
     slurm.set_actuation(False)
+
+print("\n10a. QOS caps are raised only in a short pulse, only for jobs they hold")
+from sqp import limits
+cfg = config.defaults()
+lp = limits.LimitPulse(cfg)
+H = cfg["limits"]["hysteresis"]
+out = [lp.observe(0.9, 0, now=t) for t in range(H + 2)]
+check("no pulse while no job is held by the caps", all(o is None for o in out))
+out = [lp.observe(0.9, 3, now=100 + t) for t in range(H)]
+check("a pulse after the hysteresis, to the ceiling",
+      out[-1] == (1728, 3520) and all(o is None for o in out[:-1]), str(out))
+check("held for the pulse", lp.observe(0.9, 3, now=100 + H + 30) is None)
+check("back to base when the pulse is over",
+      lp.observe(0.9, 3, now=100 + H + 61) == (864, 1760), lp.why)
+out = [lp.observe(0.9, 3, now=200 + t) for t in range(H + 2)]
+check("no new pulse during the cooldown", all(o is None for o in out))
+out = [lp.observe(0.9, 3, now=500 + t) for t in range(H)]
+check("a new pulse as soon as the cooldown is over, if the need persisted",
+      out[0] == (1728, 3520) and all(o is None for o in out[1:]), str(out))
+check("a pulse ends early when the cluster fills up",
+      lp.observe(0.05, 3, now=500 + H + 5) == (864, 1760), lp.why)
+check("the pulse is released by the reasons squeue really prints",
+      slurm.CAP_REASONS == {"QOSMaxCpuPerUserLimit", "MaxCpuPerAccount"})
 
 print("\n10b. the process launcher itself refuses writes while actuation is off")
 import subprocess
@@ -202,6 +227,106 @@ cfg["topology"].update(exclude_interactive=False, exclude_gpu_nodes=False,
 keep, dropped = d.partition_filter(parts, nodes)
 check("each exclusion can be turned off; names can be excluded",
       sorted(keep) == ["Interactive", "gpu", "mixed"] and "zen3" in dropped, f"{keep}")
+
+print("\n12. node pins follow PriorityTier, then shape")
+TIERS = {'zen5': 10, 'zen3': 9, 'zen5x': 8, 'zen3x': 7}
+# A zen5 node already filled with low-memory jobs has 8 CPUs and ~490 GB left:
+# 61 GB per CPU, the ratio of a high-memory job. The empty zen5 node would do too,
+# but a 4-CPU/200 GB job there wastes its CPUs for everyone else. zen3 has a
+# snug node as well, but ranks below zen5, and Slurm tries zen5 first.
+nf = {'n12': (8, 500000, ['zen5']), 'n16': (256, 1500000, ['zen5']),
+      'n03': (4, 204800, ['zen3']), 'n14': (288, 2300000, ['zen5x'])}
+node, parts, info = policy.pick_node(4, 204800, ['zen3', 'zen5'], nf, TIERS, DEMAND, 1.0)
+check("pins inside the highest-ranked partition with room",
+      node in ('n12', 'n16') and parts == ['zen5'], f"{node} {parts} {info['why']}")
+check("there, on the slim node whose leftover memory suits the job",
+      node == 'n12', info["why"])
+nf2 = dict(nf, n12=(0, 0, ['zen5']), n16=(0, 0, ['zen5']))
+node, parts, info = policy.pick_node(4, 204800, ['zen3', 'zen5'], nf2, TIERS, DEMAND, 1.0)
+check("falls to the next rank only when the top one is full",
+      node is None and "only n03" in info["why"], info["why"])
+nf3 = {'a': (64, 256000, ['zen5']), 'b': (64, 256000, ['zen5'])}
+node, _, info = policy.pick_node(4, 8192, ['zen5'], nf3, TIERS, DEMAND, 1.0)
+check("no pin when the candidates are equally good", node is None, info["why"])
+G = 1024
+# Where capacity cannot tell the nodes apart, the free memory per CPU decides.
+nf4 = {'small': (8, 40 * G, ['zen5']), 'big': (256, 1500 * G, ['zen5'])}
+node, _, info = policy.pick_node(8, 32 * G, ['zen5'], nf4, TIERS, DEMAND, 1.0, 0.1)
+check("near-equal by capacity: the closest memory per CPU wins (5 vs 5.9 GB for 4)",
+      node == 'small', info["why"])
+nf5 = {'r60': (4, 240 * G, ['zen5']), 'r150': (4, 600 * G, ['zen5'])}
+node, _, info = policy.pick_node(1, 100 * G, ['zen5'], nf5, TIERS, DEMAND, 1.0, 0.1)
+check("beyond the demand mix, where capacity is blind, the ratio still decides",
+      node == 'r150', info["why"])
+node, _, info = policy.pick_node(8, 32 * G, ['zen5'], nf4, TIERS, DEMAND, 1.0, 0.5)
+check("no pin when the ratio difference is below min_ratio_gain", node is None, info["why"])
+check("a job waiting on a dependency is pinned like any other",
+      policy.pin_eligible(dict(jobid="5", nnodes=1, req_nodes="", reason="Dependency")) is None)
+node, _, info = policy.pick_node(512, 8192, ['zen5'], nf3, TIERS, DEMAND, 1.0)
+check("no pin when nothing has room", node is None and "no node" in info["why"])
+check("arrays, multi-node, user nodelists and held jobs are never pinned",
+      all(policy.pin_eligible(dict(jobid=i, nnodes=n, req_nodes=r, reason=why))
+          for i, n, r, why in (("5_1", 1, "", "None"), ("5", 2, "", "None"),
+                               ("5", 1, "bio-node01", "None"), ("5", 1, "", "JobHeldUser")))
+      and policy.pin_eligible(dict(jobid="5", nnodes=1, req_nodes="", reason="None", ntasks=100))
+      and policy.pin_eligible(dict(jobid="5", nnodes=1, req_nodes="", reason="None", ntasks=1)) is None)
+tbl = policy.build_table(CFG, TOTAL, scale(0.3), SPEED)
+lua = policy.render_lua(tbl, CFG, time.time(), 1, TOTAL,
+                        dict(nodes=nf, tiers=TIERS, room={1000: 64}))
+check("pin data is emitted when pinning", 'pin = {' in lua and '["n16"] = {256, 1500000, "zen5"}' in lua
+      and '[1000] = 64' in lua)
+check("and not otherwise", 'pin = {' not in policy.render_lua(tbl, CFG, time.time(), 1, TOTAL))
+
+print("\n13. stale pins are released, and only sqp's own")
+real_ac, real_apply = slurm.admin_comment, slurm.apply
+comments = {"7": "sqp:pin=n16;from=zen5,zen3", "8": ""}
+slurm.admin_comment = lambda jid: comments[jid]
+applied = []
+slurm.apply = lambda argv, timeout=10.0: applied.append(argv) or True
+try:
+    now = time.time()
+    jobs = [dict(jobid="7", state="PD", req_nodes="n16", submit=now - 120, reason="Resources"),
+            dict(jobid="8", state="PD", req_nodes="n03", submit=now - 120, reason="Resources"),
+            dict(jobid="9", state="PD", req_nodes="n16", submit=now - 5, reason="Resources")]
+    for mode in ("observe", "enforce"):
+        cfg = config.defaults(); cfg["general"]["mode"] = mode
+        d = daemon.Daemon(cfg); d.log_fh = io.StringIO()
+        d.release_pins(jobs, now)
+        recs = [json.loads(l) for l in d.log_fh.getvalue().splitlines()]
+        rel = [r for r in recs if r.get("action") == "release_pin"]
+        if mode == "observe":
+            check("observe: logs the release it would do, runs nothing",
+                  [r["jobid"] for r in rel] == ["7"] and not rel[0]["executed"] and applied == [],
+                  json.dumps(rel)[:200])
+        else:
+            check("enforce: releases the stale sqp pin and restores its partitions",
+                  applied == [["scontrol", "update", "jobid=7", "reqnodelist="],
+                              ["scontrol", "update", "jobid=7", "partition=zen5,zen3",
+                               "admincomment=sqp:released=n16"]],
+                  str(applied))
+    check("a user's own --nodelist (job 8) and a fresh pin (job 9) are left alone",
+          all("jobid=8" not in a and "jobid=9" not in a for a in applied))
+    tries = []
+    def flaky(argv, timeout=10.0):
+        tries.append(argv)
+        if len(tries) == 1:
+            raise slurm.SlurmError("rc=1 Resource temporarily unavailable for job 7")
+        return True
+    slurm.apply = flaky
+    check("Slurm's EAGAIN on a job update is retried",
+          daemon.Daemon.apply_retrying(["scontrol"], wait=0) and len(tries) == 2)
+    slurm.apply = lambda argv, timeout=10.0: (_ for _ in ()).throw(
+        slurm.SlurmError("rc=1 Job is no longer pending execution for job 7"))
+    check("a job that started meanwhile counts as released",
+          daemon.Daemon.apply_retrying(["scontrol"], wait=0))
+finally:
+    slurm.admin_comment, slurm.apply = real_ac, real_apply
+    slurm.set_actuation(False)
+
+print("\n14. powered-down nodes are usable; drained and down ones are not")
+check("power saving is not down", slurm._up("IDLE+CLOUD+POWERED_DOWN") and slurm._up("IDLE~"))
+check("down, drained and failing are down",
+      not any(slurm._up(x) for x in ("DOWN*", "MIXED+DRAIN", "IDLE+DRAIN", "FAILING", "INVAL")))
 
 check("no test started a process", subprocess.run is _no_processes)
 

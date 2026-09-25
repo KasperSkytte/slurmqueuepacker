@@ -66,14 +66,23 @@ def nodes() -> dict:
                 alloc_mem=int(d.get("AllocMem", 0)),
                 partitions=[p for p in d.get("Partitions", "").split(",") if p],
                 gpu=_has_gpu(d.get("Gres", ""), d.get("CfgTRES", "")),
-                # DOWN/DRAIN/FAIL nodes offer nothing; INVAL too
-                up=not any(s in state for s in ("DOWN", "DRAIN", "FAIL", "INVAL")),
+                up=_up(state),
             )
         except ValueError:
             continue
     if not out:
         raise SlurmError("scontrol show nodes returned nothing parsable")
     return out
+
+
+# Node states that offer nothing. Matched as whole flags: a substring test would
+# count POWERED_DOWN (idle under power saving, resumed on demand) as DOWN.
+_UNUSABLE = {"DOWN", "DRAIN", "DRAINED", "DRAINING", "FAIL", "FAILING", "INVAL"}
+
+
+def _up(state: str) -> bool:
+    """'IDLE+CLOUD+POWERED_DOWN' -> True, 'MIXED+DRAIN' -> False."""
+    return not (set(state.upper().rstrip("*~#!%$@^-").split("+")) & _UNUSABLE)
 
 
 def _has_gpu(gres: str, cfg_tres: str) -> bool:
@@ -97,10 +106,11 @@ def partitions() -> dict:
 
 PENDING_FMT = ("JobID:|,UserName:|,Account:|,NumCPUs:|,MinMemory:|,"
                "TimeLimit:|,Priority:|,Reason:|,QOS:|,Partition:|,Name:|")
-# StateCompact and tres-alloc are appended so the indices above stay put.
-# tres-alloc is the *requested* TRES for a job that has not started; its mem is
-# the job's total, which MinMemory is not when the job used --mem-per-cpu.
-QUEUE_FMT = PENDING_FMT + ",StateCompact:|,tres-alloc:|"
+# The rest is appended so the indices above stay put. tres-alloc is the
+# *requested* TRES for a job that has not started; its mem is the job's total,
+# which MinMemory is not when the job used --mem-per-cpu.
+QUEUE_FMT = PENDING_FMT + (",StateCompact:|,tres-alloc:|,ReqNodes:|,NodeList:|,"
+                           "SubmitTime:|,NumTasks:|")
 
 
 def queue(states: str = "PD,R,CF") -> list[dict]:
@@ -109,7 +119,7 @@ def queue(states: str = "PD,R,CF") -> list[dict]:
     out = []
     for line in txt.splitlines():
         f = [x.strip() for x in line.split("|")]
-        if len(f) < 13:
+        if len(f) < 17:
             continue
         try:
             tres = dict(kv.split("=", 1) for kv in f[12].split(",") if "=" in kv)
@@ -119,8 +129,10 @@ def queue(states: str = "PD,R,CF") -> list[dict]:
                             req_mem=_mem_mb(tres.get("mem", "")) // nnodes,
                             timelimit=_mins(f[5]), priority=float(f[6] or 0),
                             reason=f[7], qos=f[8], partition=f[9], name=f[10],
-                            state=f[11],
-                            gpu=any(k.startswith("gres/gpu") for k in tres)))
+                            state=f[11], nnodes=nnodes,
+                            gpu=any(k.startswith("gres/gpu") for k in tres),
+                            req_nodes=f[13], nodelist=f[14], submit=_epoch(f[15]),
+                            ntasks=int(f[16] or 1)))
         except ValueError:
             continue
     if txt.strip() and not out:
@@ -132,11 +144,26 @@ def pending() -> list[dict]:
     return queue("PD")
 
 
-LIMIT_REASONS = {
-    "QOSMaxCpuPerUserLimit", "AssocMaxCpuPerUserLimit",
-    "QOSMaxCpuPerAccountLimit", "AssocGrpCpuLimit", "QOSGrpCpuLimit",
-    "AssocMaxJobsLimit", "QOSMaxJobsPerUserLimit",
-}
+def _epoch(s: str) -> float | None:
+    """Slurm's local '2026-09-24T12:23:58' -> epoch seconds."""
+    try:
+        return time.mktime(time.strptime(s, "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
+        return None
+
+
+def admin_comment(jobid: str) -> str:
+    """A job's AdminComment, which squeue cannot print."""
+    txt = _run(["scontrol", "show", "job", jobid, "--oneliner"])
+    return _kv(txt).get("AdminComment", "") if txt.strip() else ""
+
+
+# Pending reasons, exactly as squeue prints them (checked against the 24.11 and
+# 26.05 sources). CAP_REASONS are the holds the per-user/per-account CPU caps
+# cause -- MaxTRESPU and MaxTRESPA -- which are the ones a limit pulse releases.
+CAP_REASONS = {"QOSMaxCpuPerUserLimit", "MaxCpuPerAccount"}
+LIMIT_REASONS = CAP_REASONS | {"AssocGrpCpuLimit", "QOSGrpCpuLimit",
+                               "AssocMaxJobsLimit", "QOSMaxJobsPerUserLimit"}
 
 
 def _mem_mb(s: str) -> int:
@@ -216,6 +243,16 @@ def cmd_set_job_qos(jobid: str, qos: str) -> list[str]:
 
 def cmd_set_array_throttle(jobid: str, n: int) -> list[str]:
     return ["scontrol", "update", f"jobid={jobid}", f"arraytaskthrottle={n}"]
+
+
+def cmd_release_pin(jobid: str, parts: str, note: str) -> list[list[str]]:
+    """Undo a pin: drop the node requirement, then restore the partitions.
+
+    Two commands, because Slurm checks new partitions against the node
+    requirement still in place and refuses ones the pinned node is not in."""
+    return [["scontrol", "update", f"jobid={jobid}", "reqnodelist="],
+            ["scontrol", "update", f"jobid={jobid}", f"partition={parts}",
+             f"admincomment={note}"]]
 
 
 def cmd_set_qos_cpu_limits(qos: str, per_user: int, per_account: int) -> list[str]:

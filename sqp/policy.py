@@ -4,6 +4,7 @@ tools/simulate.py imports from here, so the policy that is evaluated offline and
 the policy that runs in production cannot drift apart.
 """
 from __future__ import annotations
+import math
 
 
 def phi_node(fc: float, fm: float, demand) -> float:
@@ -90,6 +91,96 @@ def choose(cpus, mem_mb, nodes_by_part, free_by_part, speed, demand,
     return sorted(p for c, p in scored if c <= lo + tolerance * cpus)
 
 
+def pick_node(cpus, mem_mb, allowed, node_free, tiers, demand, min_gain=1.0,
+              min_ratio_gain=0.1):
+    """Which node a job that can start now should start on. Authoritative;
+    job_submit.lua's pick_node mirrors it.
+
+    Slurm tries a job's partitions in PriorityTier order and starts it in the
+    first one with room, so the node is chosen inside the highest-ranked allowed
+    partition that has room -- never against the tiers. Within it:
+
+    1. the nodes that destroy the least placeable capacity (phi), within
+       min_gain of the best, are the contenders;
+    2. of those, the one whose free memory per CPU is closest to the job's
+       (|log ratio|) wins, then the lower phi loss, then the name.
+
+    Phi already favours matching shapes, but it is blind beyond the demand mix
+    (every ratio above its top quantile scores alike) and near-indifferent between
+    leftovers of similar shape; the ratio decides those. No pin when Slurm has no
+    choice (one candidate), or when the winner is neither min_gain better by phi
+    nor min_ratio_gain better by ratio than the worst candidate.
+
+    node_free: name -> (free_cpus, free_mem_mb, [partitions]).
+    Returns (node or None, partitions for the pinned job, info dict with "why").
+    """
+    ranks = sorted({tiers.get(p, 1) for p in allowed}, reverse=True)
+    for r in ranks:
+        group = {p for p in allowed if tiers.get(p, 1) == r}
+        cands = sorted((phi_node(fc, fm, demand) - phi_node(fc - cpus, fm - mem_mb, demand), n)
+                       for n, (fc, fm, parts) in node_free.items()
+                       if fc >= cpus and fm >= mem_mb and group & set(parts))
+        if cands:
+            break
+    else:
+        return None, [], dict(why="no node has room for it now", candidates=0)
+    tier = ",".join(sorted(group))
+    want = mem_mb / cpus
+
+    def mismatch(n):
+        fc, fm, _ = node_free[n]
+        return abs(math.log((fm / fc) / want))
+    near = [(mismatch(n), loss, n) for loss, n in cands if loss - cands[0][0] < min_gain]
+    mis, loss, best = min(near)
+    phi_gain = cands[-1][0] - loss
+    ratio_gain = max(mismatch(n) for _, n in cands) - mis
+    info = dict(tier=tier, candidates=len(cands), phi_gain=round(phi_gain, 2),
+                ratio_gain=round(ratio_gain, 3))
+    have = node_free[best][1] / node_free[best][0] / 1024
+    if len(cands) == 1:
+        info["why"] = f"only {best} in {tier} has room, so Slurm will use it anyway"
+        return None, [], info
+    if phi_gain >= min_gain:
+        info["why"] = (f"{len(cands)} {tier} nodes could start it now; {best} leaves the most "
+                       f"room for other jobs ({phi_gain:.1f} CPUs' worth more than the worst "
+                       f"choice), with {have:.1f} GB per CPU free for a job asking "
+                       f"{want / 1024:.1f}")
+    elif ratio_gain >= min_ratio_gain:
+        info["why"] = (f"{len(cands)} {tier} nodes could start it now and would leave about "
+                       f"as much room; {best}'s free memory per CPU ({have:.1f} GB) is closest "
+                       f"to the job's ({want / 1024:.1f} GB)")
+    else:
+        info["why"] = f"the {len(cands)} {tier} nodes with room are about equally good"
+        return None, [], info
+    parts = sorted(p for p in node_free[best][2] if p in allowed)
+    return best, parts, info
+
+
+# Pending reasons under which a job cannot start at once whatever the node.
+# A job waiting on a dependency is treated like any other: pinned if it fits now,
+# released after [pin] release_after if it has not started by then.
+NOT_STARTABLE = ("DependencyNeverSatisfied", "BeginTime", "JobHeldUser",
+                 "JobHeldAdmin", "PartitionDown", "PartitionInactive")
+
+
+def pin_eligible(job) -> str | None:
+    """None if a queued job is the kind the plugin would pin; else why not.
+    Mirrors the plugin's pin_eligible as far as squeue can tell."""
+    if "_" in job["jobid"]:
+        return "array job"
+    if job.get("nnodes", 1) > 1:
+        return "multi-node job"
+    # The plugin also pins multi-task jobs limited to one node (-N 1), but
+    # squeue cannot show that limit for a pending job, so a dry run skips them.
+    if job.get("ntasks", 1) > 1:
+        return "several tasks, which Slurm may split across nodes"
+    if job.get("req_nodes"):
+        return "the user chose nodes"
+    if job.get("reason") in NOT_STARTABLE:
+        return f"cannot start yet ({job['reason']})"
+    return None
+
+
 def static_fallback(cpus, mem_mb, slim, fat, threshold=6000):
     """What the plugin does when the table is missing, stale or unparsable."""
     return list(slim) if mem_mb / max(cpus, 1) < threshold else list(fat)
@@ -168,7 +259,7 @@ def _reps(edges):
     return out
 
 
-def render_lua(table, cfg, generated_at, version, nodes_by_part=None) -> str:
+def render_lua(table, cfg, generated_at, version, nodes_by_part=None, pin=None) -> str:
     """Emit the table as Lua source, so the plugin parses it with the interpreter
     it already has: no JSON library, no dependency, no parser to get wrong.
 
@@ -191,5 +282,33 @@ def render_lua(table, cfg, generated_at, version, nodes_by_part=None) -> str:
     lines += ["  },", "  t = {"]
     for (i, j, k), parts in sorted(table.items()):
         lines.append('    ["%d,%d,%d"] = "%s",' % (i, j, k, ",".join(parts)))
-    lines += ["  },", "}", ""]
+    lines.append("  },")
+    if pin:
+        lines += render_pin(cfg, pin)
+    lines += ["}", ""]
     return "\n".join(lines)
+
+
+def render_pin(cfg, pin) -> list[str]:
+    """What the plugin needs to choose a node: free space per node, partition
+    ranks, the demand mix for phi, and each user's room under the CPU cap."""
+    c = cfg["pin"]
+    out = ["  pin = {", f"    max_age = {c['max_age']:.0f},",
+           f"    min_gain = {c['min_gain']},",
+           f"    min_ratio_gain = {c['min_ratio_gain']},",
+           "    demand = {%s}," % ", ".join("{%s, %s}" % (q, w)
+                                            for q, w in cfg["policy"]["demand"]),
+           "    tier = {"]
+    for p, t in sorted(pin["tiers"].items()):
+        out.append('      ["%s"] = %d,' % (p, t))
+    out += ["    },", "    nodes = {"]
+    for n, (fc, fm, parts) in sorted(pin["nodes"].items()):
+        out.append('      ["%s"] = {%d, %d, "%s"},' % (n, fc, fm, ",".join(parts)))
+    out += ["    },"]
+    if pin.get("room") is not None:
+        out += [f'    cap_qos = "{cfg["limits"]["qos_name"]}",', "    room = {"]
+        for uid, left in sorted(pin["room"].items()):
+            out.append("      [%d] = %d," % (uid, left))
+        out += ["    },"]
+    out.append("  },")
+    return out

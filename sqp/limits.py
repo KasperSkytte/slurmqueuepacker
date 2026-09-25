@@ -1,23 +1,21 @@
-"""Elastic limits.
+"""Elastic limits, as a short pulse.
 
-The QOS caps exist to stop one user swallowing the cluster inside a minute. They
-are not a rationing scheme. When the cluster is persistently idle the cap can be
-raised -- but raised *uniformly*, for everyone, so that every user faces the same
-number and fair-share keeps deciding who fills the room. Raising is slow and
-stepwise; lowering is instant.
+The QOS caps exist to stop one user swallowing the cluster inside a minute, and
+they must stay in place almost all the time: a user who submits a large pool of
+jobs while the caps are raised can hold nodes for days, because jobs are not
+preemptible. So the caps are never raised for long. When jobs are held only by
+the per-user or per-account CPU cap, and they would fit in idle hardware that
+nobody else is waiting for, the caps are raised for a minute -- long enough for
+the scheduler to start some of those jobs -- and then put back to base. Between
+pulses there is a cooldown. The raise is uniform, the same for every user, so
+fair-share still decides who gets the room.
 """
 from __future__ import annotations
 import time
 
 
-class GlobalLimitController:
-    """Moves MaxTRESPU/MaxTRESPA on one QOS between a base and a ceiling.
-
-    Asymmetric on purpose: it takes `hysteresis` consecutive idle observations to
-    step up, and a single busy observation to snap all the way back. Being slow to
-    give and quick to take back is the safe direction -- a cap that is too high for
-    a few seconds can commit nodes for days, because jobs are not preemptible.
-    """
+class LimitPulse:
+    """Moves MaxTRESPU/MaxTRESPA on one QOS: base, briefly up, back to base."""
 
     def __init__(self, cfg):
         c = cfg["limits"]
@@ -27,49 +25,62 @@ class GlobalLimitController:
         self.raise_above = c["raise_above"]
         self.lower_below = c["lower_below"]
         self.hysteresis = c["hysteresis"]
-        self.step = c["step"]
+        self.pulse = c["pulse_seconds"]
+        self.cooldown = c["cooldown_seconds"]
         self.qos = c["qos_name"]
-        self.cur_u = float(self.base_u)
-        self.cur_a = float(self.base_a)
+        self.cur_u, self.cur_a = self.base_u, self.base_a
         self.streak = 0
-        self.last_change = 0.0
-        self.raised_since = None
+        self.raised_at = None
+        self.lowered_at = float("-inf")
         self.why = ""
 
-    def observe(self, idle_fraction: float, now: float | None = None):
-        """Return (per_user, per_account) if the caps should change, else None."""
-        now = now or time.time()
-        prev = (self.cur_u, self.cur_a)
-        if idle_fraction >= self.raise_above:
-            self.streak += 1
-            if self.streak >= self.hysteresis:
-                self.cur_u = min(self.cur_u * self.step, self.base_u * self.ceiling)
-                self.cur_a = min(self.cur_a * self.step, self.base_a * self.ceiling)
-                self.why = (f"idle placeable fraction {idle_fraction:.3f} >= raise_above "
-                            f"{self.raise_above} for {self.streak} consecutive intervals; "
-                            f"step x{self.step}, capped at {self.ceiling}x base")
-                self.streak = 0
-        elif idle_fraction < self.lower_below:
-            self.cur_u, self.cur_a = float(self.base_u), float(self.base_a)
-            self.why = (f"idle placeable fraction {idle_fraction:.3f} < lower_below "
-                        f"{self.lower_below}; snap back to base")
-            self.streak = 0
-        else:
-            self.streak = 0
+    @property
+    def raised(self) -> bool:
+        return self.raised_at is not None
 
-        if (round(self.cur_u), round(self.cur_a)) == (round(prev[0]), round(prev[1])):
+    def observe(self, idle_fraction: float, held_that_fit: int, now: float | None = None):
+        """Return (per_user, per_account) if the caps should change, else None.
+
+        held_that_fit: pending jobs held by a CPU cap that fit in free space now.
+        """
+        now = time.time() if now is None else now
+        if self.raised:
+            if now - self.raised_at >= self.pulse:
+                self.why = f"the {self.pulse:.0f} s pulse is over; back to base"
+            elif idle_fraction < self.lower_below:
+                self.why = (f"the cluster filled up (idle {idle_fraction:.0%} < "
+                            f"{self.lower_below:.0%}); back to base early")
+            else:
+                return None
+            return self.reset(now)
+
+        idle = idle_fraction >= self.raise_above
+        self.streak = self.streak + 1 if idle and held_that_fit else 0
+        if self.streak < self.hysteresis or now - self.lowered_at < self.cooldown:
             return None
-        self.last_change = now
-        self.raised_since = now if self.cur_u > self.base_u else None
-        return int(self.cur_u), int(self.cur_a)
+        self.streak = 0
+        self.raised_at = now
+        self.cur_u = int(self.base_u * self.ceiling)
+        self.cur_a = int(self.base_a * self.ceiling)
+        self.why = (f"{held_that_fit} jobs held only by the CPU cap would fit in idle "
+                    f"hardware, and {idle_fraction:.0%} of the cluster has been idle for "
+                    f"{self.hysteresis} checks; raise for {self.pulse:.0f} s")
+        return self.cur_u, self.cur_a
+
+    def reset(self, now: float | None = None):
+        """Back to base. Returns the base caps."""
+        self.raised_at = None
+        self.lowered_at = time.time() if now is None else now
+        self.cur_u, self.cur_a = self.base_u, self.base_a
+        return self.cur_u, self.cur_a
 
     @property
     def multiple(self) -> float:
         return self.cur_u / self.base_u
 
     def state(self) -> dict:
-        return dict(per_user=int(self.cur_u), per_account=int(self.cur_a),
-                    multiple=round(self.multiple, 3), streak=self.streak)
+        return dict(per_user=self.cur_u, per_account=self.cur_a, raised=self.raised,
+                    streak=self.streak)
 
 
 class PerJobPromoter:
@@ -78,8 +89,8 @@ class PerJobPromoter:
     Kept because it is strictly more conservative -- it can only ever affect one
     named job at a time -- but note the measured bias: it promotes only jobs that
     can start immediately, which systematically favours small, easy-to-place work
-    over exactly the large high-ratio jobs that wait longest. Global mode has no
-    such bias, which is why it is the default.
+    over exactly the large high-ratio jobs that wait longest. The global pulse has
+    no such bias, which is why it is the default. Not wired into sqpd yet.
     """
 
     def __init__(self, cfg):

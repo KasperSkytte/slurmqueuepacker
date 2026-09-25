@@ -10,9 +10,9 @@ surface is ~300 buckets and takes single-digit milliseconds; what must never
 block is the tick, and a slow `scontrol` call otherwise would.
 """
 from __future__ import annotations
-import argparse, json, os, signal, sys, threading, time, traceback
+import argparse, collections, json, os, pwd, signal, sys, threading, time, traceback
 
-from . import config, limits, policy, slurm
+from . import config, limits, narrate, policy, slurm
 
 
 class Shared:
@@ -24,6 +24,7 @@ class Shared:
         self.parts: dict = {}
         self.pending: list = []
         self.pending_at: float = 0.0
+        self.jobs: list = []          # pending and running, from the last queue poll
         self.stop = threading.Event()
         self.errors: dict = {}
 
@@ -46,7 +47,7 @@ class Daemon:
         # not the path the plugin reads.
         self.dryrun_table_path = os.path.join(self.state_dir, "policy.dryrun.lua")
         self.status_path = os.path.join(self.state_dir, "status.json")
-        self.limiter = limits.GlobalLimitController(cfg)
+        self.limiter = limits.LimitPulse(cfg)
         self.promoter = limits.PerJobPromoter(cfg)
         self.version = 0
         self.last_rendered = None
@@ -54,8 +55,12 @@ class Daemon:
         self.last_write = 0.0
         self.demand = [tuple(x) for x in cfg["policy"]["demand"]]
         self.log_fh = None
+        self.text_fh = None
         self.last_shape = None    # (i, j) -> partitions, for logging what changed
-        self.snap = None          # (table, cap, total, free, speed, version) for shadowing
+        self.last_pin_sig = None
+        self.snap = None          # latest decision surface, for shadowing (a dict)
+        self.released: set = set()   # pinned jobs already released or not ours
+        self.uids: dict = {}
         self.seen = None          # job ids already shadowed; None until the first poll
         # Belt and braces: the mode checks below decide what is *attempted*, and
         # slurm.apply() refuses to run anything unless this is on.
@@ -78,6 +83,22 @@ class Daemon:
                 pass
         else:
             print(line, flush=True)
+        if self.text_fh and (text := narrate.render(rec)):
+            try:
+                self.text_fh.write(text + "\n"); self.text_fh.flush()
+            except OSError:
+                pass
+
+    def open_logs(self):
+        for key, attr in (("log_file", "log_fh"), ("text_log", "text_fh")):
+            path = self.cfg["general"].get(key)
+            if not path:
+                continue
+            try:
+                os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+                setattr(self, attr, open(path, "a"))
+            except OSError as e:
+                print(f"sqpd: cannot open {path}: {e}", file=sys.stderr)
 
     def blocked(self, modes) -> str | None:
         """Why an action may not be carried out now, or None if it may."""
@@ -87,7 +108,7 @@ class Daemon:
             return "disable_file present"
         return None
 
-    def intend(self, action, cmd, why, blocked, run, **kw):
+    def intend(self, action, cmd, why, blocked, run, quiet=False, **kw):
         """Log an intended change, and carry it out only if nothing blocks it.
 
         Every change sqpd would make goes through here, so the decision log is
@@ -103,6 +124,8 @@ class Daemon:
                 extra["error"] = repr(e)
         if blocked:
             extra["blocked"] = blocked
+        if quiet and "error" not in extra:
+            return
         self.log("action", action=action, executed=executed, **extra,
                  why=why, cmd=cmd, **kw)
 
@@ -147,6 +170,41 @@ class Daemon:
                 by_part_free[p] = free
         return by_part_total, by_part_free
 
+    def pin_active(self) -> bool:
+        """Pins need sqpd to release the ones that do not start, which is an
+        enforce-mode action. observe shows what enforce would do; advise never pins."""
+        return self.cfg["pin"]["enabled"] and self.mode != "advise"
+
+    def node_free(self, nodes, parts) -> dict:
+        """name -> (free cpus, free mem, [batch partitions]) for nodes a job could use."""
+        batch = set(self.batch_partitions(parts, nodes))
+        out = {}
+        for n, d in nodes.items():
+            ps = sorted(p for p in d["partitions"] if p in batch)
+            if ps and d["up"] and self.usable_node(d):
+                out[n] = (max(0, d["cpus"] - d["alloc_cpus"]),
+                          max(0, d["mem"] - d["alloc_mem"]), ps)
+        return out
+
+    def uid(self, user):
+        if user not in self.uids:
+            try:
+                self.uids[user] = pwd.getpwnam(user).pw_uid
+            except KeyError:
+                self.uids[user] = None
+        return self.uids[user]
+
+    def user_room(self, jobs) -> dict | None:
+        """uid -> CPUs left under the per-user cap, for users with running jobs."""
+        if self.cfg["limits"]["mode"] != "global":
+            return None
+        qos, cap = self.cfg["limits"]["qos_name"], int(self.limiter.cur_u)
+        used = collections.Counter()
+        for j in jobs:
+            if j["state"] in ("R", "CF") and j["qos"] == qos:
+                used[j["user"]] += j["cpus"]
+        return {u: cap - c for user, c in used.items() if (u := self.uid(user)) is not None}
+
     def speeds(self, parts) -> dict:
         cfgs = self.cfg["topology"]["speed"]
         dflt = self.cfg["topology"]["default_speed"]
@@ -175,9 +233,12 @@ class Daemon:
             try:
                 q = slurm.queue()
                 with self.sh.lock:
+                    self.sh.jobs = q
                     self.sh.pending = [j for j in q if j["state"] == "PD"]
                     self.sh.pending_at = time.time()
                 self.shadow(q)
+                if self.cfg["pin"]["enabled"]:
+                    self.release_pins(q, time.time())
             except Exception as e:
                 if self.sh.note_error("queue", e):   # log each distinct failure once
                     self.log("error", where="queue", detail=repr(e))
@@ -204,6 +265,9 @@ class Daemon:
     def score_once(self, nodes, parts, now):
         total, free = self.shapes(nodes, parts)
         if not total:
+            e = "no usable nodes in any batch partition (all down, drained or excluded?)"
+            if self.sh.note_error("score", e):
+                self.log("error", where="score", detail=e)
             return
         speed = self.speeds(total)
         table = policy.build_table(self.cfg, total, free, speed)
@@ -213,16 +277,37 @@ class Daemon:
         # write-on-change rule exists to prevent.
         sig = hash(tuple(sorted((k, v_) for k, vs in table.items()
                                 for v_ in (",".join(vs),))))
-        self.snap = (table, policy.caps(total), total, free, speed, self.version)
-        refresh = (now - self.last_write) > self.cfg["cadence"]["policy_max_age"] / 3
-        if sig == self.last_sig and not refresh:
+        with self.sh.lock:
+            jobs = list(self.sh.jobs)
+        state = dict(nodes=self.node_free(nodes, parts),
+                     tiers={p: parts[p]["tier"] for p in total},
+                     room=self.user_room(jobs))
+        pin = state if self.pin_active() else None
+        pin_sig = hash(repr(pin)) if pin else None
+        self.snap = dict(table=table, cap=policy.caps(total), total=total, free=free,
+                         speed=speed, version=self.version, node_free=state["nodes"],
+                         tiers=state["tiers"], room=state["room"])
+        # Rewrite when the partition decisions change, when free space changes
+        # while pinning (the plugin pins from it), and often enough that the
+        # plugin never sees the table as stale: max_age/3, or pin max_age/2.
+        age = now - self.last_write
+        refresh = age > self.cfg["cadence"]["policy_max_age"] / 3 or \
+            (pin is not None and age > self.cfg["pin"]["max_age"] / 2)
+        if sig == self.last_sig and pin_sig == self.last_pin_sig and not refresh:
             return
         changed = sig != self.last_sig
-        self.last_sig = sig
+        self.last_sig, self.last_pin_sig = sig, pin_sig
         self.last_write = now
         self.version += 1
-        rendered = policy.render_lua(table, self.cfg, now, self.version, total)
+        rendered = policy.render_lua(table, self.cfg, now, self.version, total, pin)
         self.last_rendered = rendered
+        if not changed:                      # free space or refresh only: say nothing
+            self.intend("write_policy_table", f"write {self.table_path}", "",
+                        self.blocked(("advise", "enforce")),
+                        lambda: self._write_atomic(self.table_path, rendered), quiet=True)
+            if self.mode == "observe":
+                self._write_atomic(self.dryrun_table_path, rendered)
+            return
         free_cpu = sum(fc for v in free.values() for fc, _ in v)
         phi = sum(policy.phi_node(fc, fm, self.demand)
                   for v in free.values() for fc, fm in v)
@@ -247,9 +332,6 @@ class Daemon:
         self.table_changes = []
         if prev is None:
             return f"first table since start ({len(shape)} shape buckets)"
-        if not changed:
-            return ("decisions unchanged; rewrite so the plugin does not treat the "
-                    f"table as stale (max_age {self.cfg['cadence']['policy_max_age']:.0f}s)")
         for key, parts in sorted(shape.items()):
             if prev.get(key) == parts:
                 continue
@@ -264,43 +346,162 @@ class Daemon:
                 "partitions within tolerance of the cheapest are admitted)")
 
     def shadow(self, jobs):
-        """Log where the plugin would have put each newly seen job, next to where
-        Slurm actually put it. The plugin acts at submission, which a dry run
-        cannot intercept, so this is how its effect is made visible."""
+        """Log what sqp would do with each newly seen job, next to what Slurm did:
+        its partitions, and whether and where it would pin the node. The plugin
+        acts at submission, which a dry run cannot intercept, so this is how its
+        effect is made visible."""
         ids = {j["jobid"] for j in jobs}
         if self.seen is None:            # placed before we were watching
             self.seen = ids
             return
         if self.snap is None:            # no table yet; try these again next poll
             return
-        table, cap, total, free, speed, version = self.snap
+        s = self.snap
         for j in jobs:
             if j["jobid"] in self.seen:
                 continue
             actual = [p for p in j["partition"].split(",") if p]
             # GPU, interactive and other partitions are routed by the plugin
             # before the table is consulted; sqp has no opinion on them.
-            if j.get("gpu") or not set(actual) & set(cap):
+            if j.get("gpu") or not set(actual) & set(s["cap"]):
                 continue
-            cpus = max(1, j["cpus"])
-            mem = max(j.get("req_mem") or j["mem"], 512)
-            would, key, refit = policy.plugin_lookup(table, cap, self.cfg, cpus, mem,
-                                                     j["timelimit"])
-            if j["state"] == "PD":
-                verdict = "same" if set(actual) == set(would) else "different"
-            else:
-                verdict = "allowed" if actual[0] in would else "excluded"
-            cost = policy.score_partitions(cpus, mem, total, free, speed, self.demand)
-            why = (f"{cpus}c x {mem // cpus} MB/CPU, {j['timelimit']} min -> bucket "
-                   f"{key[0]},{key[1]},{key[2]} of table v{version}: "
-                   f"{','.join(table.get(key, []))}")
-            if refit:
-                why += f"; refit to the job's real size -> {','.join(would)}"
-            self.log("placement", jobid=j["jobid"], user=j["user"], name=j["name"],
-                     state=j["state"], cpus=cpus, mem_mb=mem, minutes=j["timelimit"],
-                     actual=",".join(actual), would=",".join(would), verdict=verdict,
-                     why=why, cost={p: round(c, 1) for c, p in cost})
+            self.log("placement", **self.evaluate(j, actual, s))
         self.seen = ids
+
+    def evaluate(self, j, actual, s) -> dict:
+        """What sqp would do with one job, as a placement record."""
+        cpus = max(1, j["cpus"])
+        mem = max(j.get("req_mem") or j["mem"], 512)
+        would, key, refit = policy.plugin_lookup(s["table"], s["cap"], self.cfg, cpus, mem,
+                                                 j["timelimit"])
+        running = j["state"] in ("R", "CF")
+        if running:
+            verdict = "allowed" if actual[0] in would else "excluded"
+        else:
+            verdict = "same" if set(actual) == set(would) else "different"
+        cost = policy.score_partitions(cpus, mem, s["total"], s["free"], s["speed"],
+                                       self.demand)
+        why = (f"{cpus}c x {mem // cpus} MB/CPU, {j['timelimit']} min -> bucket "
+               f"{key[0]},{key[1]},{key[2]} of table v{s['version']}: "
+               f"{','.join(s['table'].get(key, []))}")
+        if refit:
+            why += f"; refit to the job's real size -> {','.join(would)}"
+
+        # In advise/enforce the plugin has already acted. A node requirement is
+        # sqp's own pin if the plugin marked it so; read the mark back.
+        sqp_pin = sqp_from = ""
+        if j.get("req_nodes") and self.mode != "observe":
+            try:
+                note = slurm.admin_comment(j["jobid"])
+            except slurm.SlurmError:
+                note = ""
+            if note.startswith("sqp:pin="):
+                sqp_pin, _, sqp_from = note[len("sqp:pin="):].partition(";from=")
+        # Recompute against what the job was given: sqp's partitions before the
+        # pin, or, once the plugin acts, the partitions it set.
+        allowed = sqp_from.split(",") if sqp_from else \
+            (actual if self.mode != "observe" else would)
+
+        # The node. A running job's own allocation is added back to its node, so
+        # the choice is made against the cluster as it was just before it started.
+        node = j.get("nodelist") if running else ""
+        nf = dict(s["node_free"])
+        if node in nf:
+            fc, fm, ps = nf[node]
+            nf[node] = (fc + cpus, fm + mem, ps)
+        pin, pin_parts = None, []
+        room = (s["room"] or {}).get(self.uid(j["user"]))
+        if not self.cfg["pin"]["enabled"]:
+            pin_why = "pinning is off"
+        # A job the plugin pinned passed its checks, including the one-node limit
+        # squeue cannot show.
+        elif (reason := policy.pin_eligible(dict(j, req_nodes="", ntasks=1)
+                                            if sqp_pin else j)):
+            pin_why = reason
+        elif room is not None and room < cpus and j["qos"] == self.cfg["limits"]["qos_name"]:
+            pin_why = f"the user is at the per-user CPU cap ({room} CPUs left)"
+        else:
+            pin, pin_parts, info = policy.pick_node(cpus, mem, allowed, nf, s["tiers"],
+                                                   self.demand, self.cfg["pin"]["min_gain"],
+                                                   self.cfg["pin"]["min_ratio_gain"])
+            pin_why = info["why"]
+            if pin and node:
+                pin_why += ("; Slurm chose the same node" if pin == node
+                            else f"; Slurm chose {node}")
+        return dict(jobid=j["jobid"], user=j["user"], name=j["name"], state=j["state"],
+                    reason=j["reason"] if not running else "", submit=j.get("submit"),
+                    node=node, cpus=cpus, mem_mb=mem, minutes=j["timelimit"],
+                    actual=",".join(actual), would=",".join(would), verdict=verdict,
+                    differences=self.differences(actual, would, cpus, mem, cost, s, running),
+                    pin=pin, pin_parts=",".join(pin_parts), pin_why=pin_why,
+                    acted=self.mode != "observe", sqp_pin=sqp_pin, sqp_from=sqp_from,
+                    why=why, cost={p: round(c, 1) for c, p in cost})
+
+    @staticmethod
+    def differences(actual, would, cpus, mem, cost, s, running) -> list[str]:
+        """Each partition the two sides disagree on, with the reason in words."""
+        room = {p for _, p in cost}
+
+        def reason(p):
+            if p not in s["total"]:
+                return "not a partition sqp assigns"
+            if not policy.feasible(cpus, mem, {p: s["total"][p]}):
+                return "no node there is big enough"
+            if p not in room:
+                return "no node there has room now"
+            return "a poorer fit for this job's shape"
+        if running:
+            p = actual[0]
+            return [] if p in would else [f"sqp would not have allowed {p}: {reason(p)}"]
+        out = [f"adds {p}" + (": it fits about as well now" if p in room else "")
+               for p in sorted(set(would) - set(actual))]
+        out += [f"drops {p}: {reason(p)}" for p in sorted(set(actual) - set(would))]
+        return out
+
+    def release_pins(self, jobs, now):
+        """Drop the pin from any job the plugin pinned that did not start. Allowed
+        in enforce mode even with the disable file present: a pin left behind
+        can hold a job to one node, so undoing pins is always safe to do."""
+        after = self.cfg["pin"]["release_after"]
+        for j in jobs:
+            jid = j["jobid"]
+            if (j["state"] != "PD" or not j.get("req_nodes") or jid in self.released
+                    or not j.get("submit") or now - j["submit"] < after):
+                continue
+            self.released.add(jid)
+            try:
+                note = slurm.admin_comment(jid)
+            except slurm.SlurmError as e:
+                self.log("error", where="release", detail=repr(e))
+                continue
+            if not note.startswith("sqp:pin="):
+                continue                 # the user's own --nodelist: never touch it
+            node, _, parts = note[len("sqp:pin="):].partition(";from=")
+            argvs = slurm.cmd_release_pin(jid, parts, f"sqp:released={node}")
+            self.intend("release_pin", " && ".join(slurm.cmdline(a) for a in argvs),
+                        f"pinned at submission but still pending after "
+                        f"{now - j['submit']:.0f} s ({j['reason']})",
+                        None if self.mode == "enforce" else f"mode={self.mode}",
+                        lambda: all([self.apply_retrying(a) for a in argvs]),
+                        jobid=jid, node=node, parts=parts)
+        self.released &= {j["jobid"] for j in jobs}
+
+    @staticmethod
+    def apply_retrying(argv, tries=3, wait=1.0) -> bool:
+        """slurm.apply, for job updates. Slurm answers some updates with EAGAIN
+        ("Resource temporarily unavailable") while it is busy with the job, and
+        the same update succeeds a moment later. A job that has started in the
+        meantime needs no further change."""
+        for i in range(tries):
+            try:
+                return slurm.apply(argv)
+            except slurm.SlurmError as e:
+                if "no longer pending" in str(e):
+                    return True
+                if "temporarily unavailable" not in str(e) or i == tries - 1:
+                    raise
+                time.sleep(wait)
+        return False
 
     def preflight(self):
         """Record what this run is able to change, and where the live cluster
@@ -333,7 +534,7 @@ class Daemon:
                     info["warnings"].append(
                         f"QOS {qos} is MaxTRESPU cpu={u} MaxTRESPA cpu={a}, config base "
                         f"is {lc['base_cpu_per_user']}/{lc['base_cpu_per_account']}; "
-                        "in enforce mode the first limit change would replace the live values")
+                        "in enforce mode sqp sets the QOS to the config's base at startup")
             except slurm.SlurmError as e:
                 info["warnings"].append(f"qos: {e}")
         self.log("preflight", **info)
@@ -365,26 +566,58 @@ class Daemon:
                   for v in free.values() for fc, fm in v)
         idle_frac = phi / total_cpu
         capped = [j for j in pend if j["reason"] in slurm.LIMIT_REASONS]
+        # Jobs a pulse could release: held by a CPU cap, in the pulsed QOS, and
+        # small enough for some node's free space right now.
+        nf = self.node_free(nodes, parts)
+        held = [j for j in pend if j["reason"] in slurm.CAP_REASONS
+                and j["qos"] == self.cfg["limits"]["qos_name"]
+                and any(fc >= j["cpus"] and fm >= (j.get("req_mem") or j["mem"])
+                        for fc, fm, _ in nf.values())]
 
         if self.cfg["limits"]["mode"] == "global":
-            change = self.limiter.observe(idle_frac)
+            before = (self.limiter.cur_u, self.limiter.cur_a)
+            change = self.limiter.observe(idle_frac, len(held))
             if change:
-                per_user, per_acct = change
-                self.log("limits", idle_fraction=round(idle_frac, 4),
-                         per_user=per_user, per_account=per_acct,
-                         multiple=round(self.limiter.multiple, 3),
-                         capped_jobs=len(capped))
-                argv = slurm.cmd_set_qos_cpu_limits(self.cfg["limits"]["qos_name"],
-                                                     per_user, per_acct)
-                self.intend("set_qos_cpu_limits", slurm.cmdline(argv), self.limiter.why,
-                            self.blocked(("enforce",)),
-                            lambda: slurm.apply(argv, timeout=30.0),
-                            idle_fraction=round(idle_frac, 4), capped_jobs=len(capped))
+                self.set_caps(change, before, idle_frac, len(held))
         self._write_atomic(self.status_path, json.dumps(dict(
             ts=time.time(), mode=self.mode, version=self.version,
             idle_fraction=round(idle_frac, 4), total_cpu=total_cpu,
             capped_jobs=len(capped), pending=len(pend),
             limits=self.limiter.state(), errors=self.sh.errors), indent=1))
+
+    def set_caps(self, caps, before, idle_frac=None, held=None):
+        """Log and, in enforce, apply a change of the per-user/per-account caps.
+        Going back to base is allowed even with the disable file present: it only
+        ever makes the cluster more conservative."""
+        per_user, per_acct = caps
+        self.log("limits", idle_fraction=idle_frac, per_user=per_user,
+                 per_account=per_acct, held_jobs=held)
+        unset = float("inf")                    # a QOS with no cap set reports None
+        lowering = per_user <= (before[0] or unset) and per_acct <= (before[1] or unset)
+        blocked = self.blocked(("enforce",)) if not lowering else \
+            (None if self.mode == "enforce" else f"mode={self.mode}")
+        argv = slurm.cmd_set_qos_cpu_limits(self.cfg["limits"]["qos_name"], per_user, per_acct)
+        self.intend("set_qos_cpu_limits", slurm.cmdline(argv), self.limiter.why, blocked,
+                    lambda: slurm.apply(argv, timeout=30.0),
+                    qos=self.cfg["limits"]["qos_name"], before_user=before[0],
+                    before_account=before[1], per_user=per_user, per_account=per_acct,
+                    idle_fraction=idle_frac, held_jobs=held)
+
+    def restore_caps(self, when: str):
+        """Put the caps back to base if the live QOS differs: at startup, in case a
+        previous run died mid-pulse, and at shutdown, in case this one is in one."""
+        if self.cfg["limits"]["mode"] != "global" or self.mode != "enforce":
+            return
+        base = (self.limiter.base_u, self.limiter.base_a)
+        try:
+            live = slurm.qos_cpu_limits(self.cfg["limits"]["qos_name"])
+        except slurm.SlurmError as e:
+            self.log("error", where="limits", detail=repr(e))
+            return
+        if live != base:
+            self.limiter.reset()
+            self.limiter.why = f"restore base caps at {when}"
+            self.set_caps(base, live)
 
     @staticmethod
     def _write_atomic(path, text):
@@ -398,17 +631,12 @@ class Daemon:
 
     # ---------------------------------------------------------------- run
     def run(self):
-        lf = self.cfg["general"]["log_file"]
-        if lf:
-            try:
-                os.makedirs(os.path.dirname(lf), exist_ok=True)
-                self.log_fh = open(lf, "a")
-            except OSError as e:
-                print(f"sqpd: cannot open {lf}: {e}; logging to stdout", file=sys.stderr)
+        self.open_logs()
         self.log("start", version=__import__("sqp").__version__,
                  limits_mode=self.cfg["limits"]["mode"],
                  cadence=self.cfg["cadence"])
         self.preflight()
+        self.restore_caps("startup")
         threads = [threading.Thread(target=t, name=n, daemon=True)
                    for t, n in ((self.poll_nodes, "nodes"), (self.poll_queue, "queue"),
                                 (self.score, "score"), (self.act, "act"))]
@@ -425,6 +653,7 @@ class Daemon:
             self.sh.stop.set()
             for t in threads:
                 t.join(timeout=3.0)
+            self.restore_caps("shutdown")
             self.log("stop")
 
 
@@ -436,6 +665,7 @@ def main(argv=None):
                     help="force mode=observe: log every action it would take, "
                          "with the command and the reason, and change nothing")
     ap.add_argument("--log-file", help="override [general] log_file")
+    ap.add_argument("--text-log", help="override [general] text_log")
     ap.add_argument("--state-dir", help="override [general] state_dir")
     ap.add_argument("--once", action="store_true",
                     help="one scoring pass to stdout, then exit (for testing)")
@@ -449,6 +679,8 @@ def main(argv=None):
         cfg["general"]["mode"] = a.mode or "observe"
     if a.log_file:
         cfg["general"]["log_file"] = a.log_file
+    if a.text_log is not None:
+        cfg["general"]["text_log"] = a.text_log
     if a.state_dir:
         cfg["general"]["state_dir"] = a.state_dir
     if a.print_config:
@@ -456,23 +688,21 @@ def main(argv=None):
 
     d = Daemon(cfg)
     if a.once:
-        # honour the configured log file here too, so --once and a real run
-        # produce the same records rather than differing by invocation
-        lf = cfg["general"]["log_file"]
-        if lf:
-            try:
-                os.makedirs(os.path.dirname(lf), exist_ok=True)
-                d.log_fh = open(lf, "a")
-            except OSError:
-                pass
+        # the configured logs here too, so --once and a real run produce the
+        # same records rather than differing by invocation
+        d.open_logs()
         d.preflight()
         d.sh.nodes, d.sh.parts = slurm.nodes(), slurm.partitions()
         d.sh.nodes_at = time.time()
+        try:
+            d.sh.jobs = slurm.queue()
+        except slurm.SlurmError as e:
+            d.log("error", where="queue", detail=repr(e))
         d.score_once(d.sh.nodes, d.sh.parts, time.time())
         d.act_once()
         try:                    # a single pass has no "new" jobs: shadow them all
             d.seen = set()
-            d.shadow(slurm.queue())
+            d.shadow(d.sh.jobs)
         except slurm.SlurmError as e:
             d.log("error", where="queue", detail=repr(e))
         print(d.last_rendered or "(no table produced)")

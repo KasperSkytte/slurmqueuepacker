@@ -11,6 +11,7 @@
 mode = "observe"
 state_dir = "/run/sqp"
 log_file = "/var/log/sqp/decisions.jsonl"
+text_log = "/var/log/sqp/sqp.log"
 disable_file = "/etc/sqp/disable"
 
 [cadence]
@@ -41,6 +42,13 @@ mem_per_cpu = [1024, 2048, 4096, 6144, 8192, 12288, 24576]
 cpus = [1, 4, 8, 16, 32, 64, 128]
 walltime_h = [1, 6, 24, 72]
 
+[pin]
+enabled = true
+min_gain = 1.0
+min_ratio_gain = 0.1
+release_after = 60.0
+max_age = 10.0
+
 [starvation]
 
 [starvation.budget_hours]
@@ -50,14 +58,15 @@ fat_ratio_threshold = 6000
 
 [limits]
 mode = "global"
+qos_name = "normal"
 base_cpu_per_user = 864
 base_cpu_per_account = 1760
 ceiling = 2.0
 raise_above = 0.25
 lower_below = 0.1
 hysteresis = 5
-step = 1.25
-qos_name = "normal"
+pulse_seconds = 60.0
+cooldown_seconds = 300.0
 flex_qos_name = "flex"
 flex_reserve = 0.05
 flex_phi_tolerance = 1.0
